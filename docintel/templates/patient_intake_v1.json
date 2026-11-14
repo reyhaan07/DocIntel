@@ -1,0 +1,261 @@
+{
+  "template_id": "patient_intake_v1",
+  "document_type": "patient intake",
+  "title": "Patient Intake Form",
+  "review_threshold": 0.6,
+  "sections": [
+    {
+      "key": "patient_information",
+      "name": "Patient Information",
+      "kind": "record",
+      "aliases": ["patient information", "patient demographics", "patient details", "demographics",
+                  "personal information", "about you", "patient info"],
+      "entity": {"type": "Patient", "prefix": "PAT", "group": "Patient"},
+      "fields": [
+        {"key": "full_name", "label": "Patient Name", "type": "person_name",
+         "aliases": ["patient name", "full name", "name of patient", "patient full name", "name"]},
+        {"key": "first_name", "label": "First Name", "type": "text", "required": true,
+         "aliases": ["first name", "given name", "patient first name"]},
+        {"key": "last_name", "label": "Last Name", "type": "text", "required": true,
+         "aliases": ["last name", "surname", "family name", "patient last name"]},
+        {"key": "date_of_birth", "label": "Date of Birth", "type": "date", "required": true,
+         "aliases": ["date of birth", "dob", "birth date", "birthdate", "d.o.b"]},
+        {"key": "sex", "label": "Sex", "type": "sex", "aliases": ["sex", "gender", "sex at birth"]},
+        {"key": "marital_status", "label": "Marital Status", "type": "lower", "aliases": ["marital status"]},
+        {"key": "address", "label": "Street Address", "type": "text",
+         "aliases": ["street address", "home address", "address", "street", "mailing address"]},
+        {"key": "city", "label": "City", "type": "text", "aliases": ["city", "town"]},
+        {"key": "state", "label": "State", "type": "state", "aliases": ["state"]},
+        {"key": "zip", "label": "ZIP", "type": "zip", "aliases": ["zip", "zip code", "postal code", "zipcode"]},
+        {"key": "phone", "label": "Phone", "type": "phone",
+         "aliases": ["mobile phone", "cell phone", "home phone", "phone number", "phone", "telephone", "mobile"]},
+        {"key": "email", "label": "Email", "type": "email",
+         "aliases": ["e-mail", "email", "email address", "e-mail address"]}
+      ]
+    },
+    {
+      "key": "spouse_information",
+      "name": "Spouse Information",
+      "kind": "record",
+      "aliases": ["spouse information", "spouse partner", "spouse", "partner", "spouse or partner",
+                  "spouse partner information"],
+      "entity": {"type": "Spouse", "prefix": "SPO", "group": "Spouse"},
+      "fields": [
+        {"key": "full_name", "label": "Spouse Name", "type": "text",
+         "aliases": ["spouse name", "partner name", "spouse partner name", "name", "full name"]},
+        {"key": "date_of_birth", "label": "Date of Birth", "type": "date",
+         "aliases": ["date of birth", "dob", "birth date"]},
+        {"key": "phone", "label": "Phone", "type": "phone", "aliases": ["phone", "phone number", "mobile phone", "cell phone"]}
+      ]
+    },
+    {
+      "key": "emergency_contact",
+      "name": "Emergency Contact",
+      "kind": "record",
+      "aliases": ["emergency contact", "in case of emergency", "emergency contact information", "emergency"],
+      "entity": {"type": "EmergencyContact", "prefix": "EMC", "group": "Emergency contact"},
+      "fields": [
+        {"key": "full_name", "label": "Contact Name", "type": "text",
+         "aliases": ["contact name", "emergency contact name", "name"]},
+        {"key": "relationship", "label": "Relationship to Patient", "type": "lower",
+         "aliases": ["relationship to patient", "relationship", "relation"]},
+        {"key": "phone", "label": "Phone", "type": "phone", "aliases": ["phone", "phone number", "contact phone"]}
+      ]
+    },
+    {
+      "key": "primary_insurance",
+      "name": "Primary Insurance",
+      "kind": "record",
+      "policy_type": "primary",
+      "aliases": ["primary insurance", "insurance primary", "primary insurance information", "primary coverage"],
+      "entity": {"type": "InsurancePolicy", "prefix": "INS", "group": "Insurance policies"},
+      "fields": [
+        {"key": "insurance_company", "label": "Insurance Company", "type": "text",
+         "aliases": ["insurance company", "carrier", "insurer", "insurance carrier", "plan name", "insurance plan"]},
+        {"key": "policy_holder_name", "label": "Policy Holder Name", "type": "text",
+         "aliases": ["policy holder name", "policyholder name", "subscriber name", "insured name", "policy holder"]},
+        {"key": "policy_holder_relationship", "label": "Relationship to Patient", "type": "lower",
+         "aliases": ["relationship to patient", "relationship to insured", "relationship"]},
+        {"key": "policy_holder_dob", "label": "Holder DOB", "type": "date",
+         "aliases": ["holder dob", "subscriber dob", "policy holder dob", "insured dob", "subscriber date of birth"]},
+        {"key": "member_id", "label": "Insurance ID", "type": "text",
+         "aliases": ["insurance id", "member id", "policy number", "subscriber id", "id number", "member number"]},
+        {"key": "group_number", "label": "Group Number", "type": "text",
+         "aliases": ["group number", "group #", "group no", "group"]},
+        {"key": "insurance_phone", "label": "Insurance Phone", "type": "phone",
+         "aliases": ["insurance phone", "phone", "customer service phone", "payer phone"]}
+      ]
+    },
+    {
+      "key": "secondary_insurance",
+      "name": "Secondary Insurance",
+      "kind": "record",
+      "policy_type": "secondary",
+      "aliases": ["secondary insurance", "insurance secondary", "secondary insurance information", "secondary coverage"],
+      "entity": {"type": "InsurancePolicy", "prefix": "INS", "group": "Insurance policies"},
+      "fields": "@primary_insurance"
+    },
+    {
+      "key": "current_medications",
+      "name": "Current Medications",
+      "kind": "table",
+      "aliases": ["current medications", "medication list", "medications", "list of medications",
+                  "current medicines", "medicines"],
+      "entity": {"type": "Medication", "prefix": "MED", "group": "Medications"},
+      "columns": [
+        {"key": "name", "label": "Medication Name", "row_key": true, "required": true, "type": "text",
+         "aliases": ["medication name", "medication", "drug", "drug name", "name of medication", "medicine"]},
+        {"key": "dosage", "label": "Dosage", "required": true, "type": "text",
+         "aliases": ["dosage", "dose", "strength", "amount"]},
+        {"key": "frequency", "label": "Frequency", "required": true, "type": "text",
+         "aliases": ["frequency", "how often", "directions", "times per day"]},
+        {"key": "prescribing_doctor", "label": "Prescribing Doctor", "required": true, "type": "doctor",
+         "aliases": ["prescribing doctor", "prescribed by", "prescriber", "prescribing physician", "doctor", "physician"]}
+      ]
+    },
+    {
+      "key": "allergies",
+      "name": "Allergies",
+      "kind": "table",
+      "aliases": ["allergies", "drug allergies", "allergy list", "known allergies", "medication allergies"],
+      "entity": {"type": "Allergy", "prefix": "ALG", "group": "Allergies"},
+      "columns": [
+        {"key": "allergen", "label": "Allergen", "row_key": true, "required": true, "type": "text",
+         "aliases": ["allergen", "allergy", "substance", "allergic to", "drug substance"]},
+        {"key": "reaction", "label": "Reaction", "type": "text", "aliases": ["reaction", "reaction type"]},
+        {"key": "severity", "label": "Severity", "type": "text", "aliases": ["severity"]}
+      ]
+    },
+    {
+      "key": "medical_history",
+      "name": "Medical History",
+      "kind": "checklist",
+      "aliases": ["medical history", "medical conditions", "past medical history", "health history", "conditions"],
+      "entity": {"type": "Condition", "prefix": "COND", "group": "Conditions"},
+      "options": [
+        {"key": "diabetes", "label": "Diabetes", "aliases": ["diabetes", "diabetes mellitus"]},
+        {"key": "hypertension", "label": "Hypertension", "aliases": ["hypertension", "high blood pressure"]},
+        {"key": "heart_disease", "label": "Heart disease", "aliases": ["heart disease", "cardiac disease"]},
+        {"key": "asthma", "label": "Asthma", "aliases": ["asthma"]},
+        {"key": "cancer", "label": "Cancer", "aliases": ["cancer"]},
+        {"key": "depression_anxiety", "label": "Depression/Anxiety",
+         "aliases": ["depression anxiety", "depression", "anxiety", "depression or anxiety"]},
+        {"key": "thyroid_disorder", "label": "Thyroid disorder", "aliases": ["thyroid disorder", "thyroid disease", "thyroid"]},
+        {"key": "arthritis", "label": "Arthritis", "aliases": ["arthritis"]}
+      ],
+      "other_aliases": ["other", "other conditions", "other condition"]
+    },
+    {
+      "key": "surgical_history",
+      "name": "Surgical History",
+      "kind": "table",
+      "aliases": ["surgical history", "past surgeries", "surgeries", "previous surgeries", "operations"],
+      "entity": {"type": "Surgery", "prefix": "SURG", "group": "Surgeries"},
+      "columns": [
+        {"key": "procedure", "label": "Procedure", "row_key": true, "required": true, "type": "text",
+         "aliases": ["procedure", "surgery", "operation", "surgery procedure", "type of surgery"]},
+        {"key": "year", "label": "Year", "type": "year", "aliases": ["year", "date", "when"]},
+        {"key": "facility", "label": "Facility", "type": "text", "aliases": ["facility", "hospital", "location", "where"]}
+      ]
+    },
+    {
+      "key": "family_history",
+      "name": "Family Medical History",
+      "kind": "family",
+      "aliases": ["family medical history", "family history", "family health history"],
+      "entity": {"type": "FamilyMember", "prefix": "FAM", "group": "Family members"},
+      "relations": ["mother", "father", "sister", "brother", "sibling", "siblings", "son", "daughter", "child",
+                    "children", "grandmother", "grandfather", "maternal grandmother", "maternal grandfather",
+                    "paternal grandmother", "paternal grandfather", "aunt", "uncle"],
+      "columns": [
+        {"key": "relation", "label": "Relation", "row_key": true, "type": "lower",
+         "aliases": ["relation", "relationship", "family member"]},
+        {"key": "living_status", "label": "Living Status", "type": "lower",
+         "aliases": ["living status", "status", "living deceased", "alive deceased"]},
+        {"key": "age", "label": "Age", "type": "text", "aliases": ["age", "age at death"]},
+        {"key": "conditions", "label": "Conditions", "type": "list",
+         "aliases": ["conditions", "medical conditions", "health conditions", "conditions illnesses"]}
+      ]
+    },
+    {
+      "key": "communication_consent",
+      "name": "Communication Consent",
+      "kind": "yes_no",
+      "aliases": ["communication consent", "communication preferences", "contact preferences",
+                  "communication permissions"],
+      "entity": {"type": "Consent", "prefix": "CONS", "group": "Consents"},
+      "questions": [
+        {"key": "voicemail", "label": "voicemail", "aliases": ["voicemail", "voice mail", "leave a message"]},
+        {"key": "text_message", "label": "text message", "aliases": ["text messages", "text message", "sms", "texts"]},
+        {"key": "email", "label": "email", "aliases": ["by email", "by e-mail", "email", "e-mail"]}
+      ]
+    },
+    {
+      "key": "release_of_information",
+      "name": "Release of Information",
+      "kind": "release",
+      "aliases": ["release of information", "authorization to release information", "release of health information",
+                  "authorization for release"],
+      "entity": {"type": "AuthorizedPerson", "prefix": "AFM", "group": "Authorized persons"},
+      "consent": {"key": "release_of_information", "label": "release of health information",
+                  "aliases": ["authorize release", "release of my health information", "authorize the release", "i authorize"]},
+      "columns": [
+        {"key": "full_name", "label": "Name", "row_key": true, "type": "text", "aliases": ["name", "full name", "person"]},
+        {"key": "relationship", "label": "Relationship", "type": "lower", "aliases": ["relationship", "relation"]},
+        {"key": "phone", "label": "Phone", "type": "phone", "aliases": ["phone", "phone number"]}
+      ]
+    },
+    {
+      "key": "consent_for_treatment",
+      "name": "Consent for Treatment",
+      "kind": "agreement",
+      "aliases": ["consent for treatment", "consent to treat", "treatment consent", "consent to treatment"],
+      "entity": {"type": "Agreement", "prefix": "AGR", "group": "Agreements"},
+      "fields": "@agreement"
+    },
+    {
+      "key": "hipaa_acknowledgment",
+      "name": "Privacy Practices Acknowledgment",
+      "kind": "agreement",
+      "aliases": ["privacy practices acknowledgment", "privacy practices acknowledgement", "hipaa acknowledgment",
+                  "hipaa acknowledgement", "notice of privacy practices", "acknowledgment of privacy practices"],
+      "entity": {"type": "Agreement", "prefix": "AGR", "group": "Agreements"},
+      "fields": "@agreement"
+    },
+    {
+      "key": "financial_agreement",
+      "name": "Financial Responsibility Agreement",
+      "kind": "agreement",
+      "aliases": ["financial responsibility agreement", "financial policy", "financial responsibility",
+                  "financial agreement", "payment policy"],
+      "entity": {"type": "Agreement", "prefix": "AGR", "group": "Agreements"},
+      "fields": "@agreement"
+    }
+  ],
+  "field_sets": {
+    "agreement": [
+      {"key": "signature", "label": "Signature", "type": "signature",
+       "aliases": ["patient signature", "signature of patient", "signature", "signed"]},
+      {"key": "printed_name", "label": "Printed Name", "type": "text", "required": true,
+       "aliases": ["print name", "printed name", "name printed", "patient name printed"]},
+      {"key": "date", "label": "Date", "type": "date", "aliases": ["date signed", "date"]}
+    ]
+  },
+  "relationship_types": {
+    "HAS_SPOUSE": [["Patient"], ["Spouse"]],
+    "HAS_EMERGENCY_CONTACT": [["Patient"], ["EmergencyContact"]],
+    "HAS_INSURANCE": [["Patient"], ["InsurancePolicy"]],
+    "ISSUED_BY": [["InsurancePolicy"], ["InsuranceCompany"]],
+    "HELD_BY": [["InsurancePolicy"], ["Patient", "Spouse", "EmergencyContact"]],
+    "TAKES_MEDICATION": [["Patient"], ["Medication"]],
+    "PRESCRIBED_BY": [["Medication"], ["Doctor"]],
+    "HAS_ALLERGY": [["Patient"], ["Allergy"]],
+    "HAS_CONDITION": [["Patient", "FamilyMember"], ["Condition"]],
+    "HAD_SURGERY": [["Patient"], ["Surgery"]],
+    "PERFORMED_AT": [["Surgery"], ["Hospital"]],
+    "HAS_FAMILY_HISTORY": [["Patient"], ["FamilyMember"]],
+    "PROVIDES_CONSENT": [["Patient"], ["Consent"]],
+    "AUTHORIZES_RELEASE_TO": [["Patient"], ["AuthorizedPerson"]],
+    "SIGNS": [["Patient"], ["Agreement"]]
+  }
+}

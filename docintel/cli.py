@@ -1,0 +1,127 @@
+"""Command line interface.
+
+    python -m docintel serve                               web app at http://localhost:8000
+    python -m docintel process samples/input -o output     one JSON + standardized PDF per file
+    python -m docintel ask output/DOC_003.json owner COND_006
+    python -m docintel scan-template reference.pdf         map a reference form's fields
+    python -m docintel samples                             regenerate the sample PDFs
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+
+def _cmd_serve(args) -> int:
+    import uvicorn
+
+    from .server import create_app
+
+    app = create_app(args.data, seed=None if args.no_seed else args.seed, ocr=args.ocr)
+    print(f"docintel web app at http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}")
+    uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
+    return 0
+
+
+def _cmd_process(args) -> int:
+    from .pipeline import process_pdf
+    from .store import write_batch_files
+
+    src = Path(args.input)
+    files = sorted(src.glob("*.pdf")) if src.is_dir() else [src]
+    if not files:
+        print(f"no PDF files found in {src}", file=sys.stderr)
+        return 1
+    out = Path(args.output)
+    out.mkdir(parents=True, exist_ok=True)
+    docs = []
+    print(f"{'doc':8} {'status':13} {'entities':>8} {'rels':>5} {'review':>6} {'missing':>7}  file")
+    for i, f in enumerate(files, start=1):
+        doc_id = f"DOC_{i:03d}"
+        doc = process_pdf(f, doc_id, ocr=args.ocr, standardized_path=out / f"{doc_id}_standardized.pdf")
+        (out / f"{doc_id}.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+        docs.append(doc)
+        s = doc["summary"]
+        print(f"{doc_id:8} {doc['document']['status']:13} {s['entities']:>8} {s['relationships']:>5} "
+              f"{s['review_items']:>6} {s['missing_items']:>7}  {f.name}")
+    write_batch_files(out, docs)
+    print(f"\nwrote {len(docs)} JSON files, {len(docs)} standardized PDFs, index.json and review_queue.json to {out}/")
+    return 0
+
+
+def _cmd_ask(args) -> int:
+    from .ask import AskError, ask
+
+    doc = json.loads(Path(args.doc).read_text(encoding="utf-8"))
+    try:
+        answer = ask(doc, args.question, *args.args)
+    except AskError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    print(json.dumps(answer, indent=2, ensure_ascii=False))
+    return 0
+
+
+def _cmd_scan(args) -> int:
+    from .scan import write_field_map
+
+    path, result = write_field_map(args.reference, args.output)
+    by_section: dict[str, int] = {}
+    for f in result["fields"].values():
+        by_section[f["section"]] = by_section.get(f["section"], 0) + 1
+    print(f"{result['form']}: {len(result['fields'])} fields mapped, {len(result['unmapped'])} unmapped")
+    for sec, n in by_section.items():
+        print(f"  {sec:28} {n:3} fields")
+    for u in result["unmapped"]:
+        print(f"  unmapped: {u['field']} (page {u['page']})")
+    print(f"field map written to {path}")
+    return 0
+
+
+def _cmd_samples(args) -> int:
+    from .samples import generate_all
+
+    for f in generate_all(Path(args.out) / "input", Path(args.out) / "upload", reference=not args.no_reference):
+        print(f)
+    return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    p = argparse.ArgumentParser(prog="docintel", description="Relationship-aware intake extraction")
+    sub = p.add_subparsers(dest="cmd", required=True)
+
+    s = sub.add_parser("serve", help="run the web app")
+    s.add_argument("--host", default="127.0.0.1")
+    s.add_argument("--port", type=int, default=8000)
+    s.add_argument("--data", default="docintel_data", help="store directory (default: ./docintel_data)")
+    s.add_argument("--seed", default="samples/input", help="folder processed on first start when the store is empty")
+    s.add_argument("--no-seed", action="store_true", help="start with an empty store")
+    s.add_argument("--ocr", action="store_true", help="OCR scanned pages on upload (needs tesseract)")
+    s.set_defaults(func=_cmd_serve)
+
+    s = sub.add_parser("process", help="process a PDF or a folder of PDFs")
+    s.add_argument("input")
+    s.add_argument("-o", "--output", default="output")
+    s.add_argument("--ocr", action="store_true", help="OCR scanned pages (needs tesseract)")
+    s.set_defaults(func=_cmd_process)
+
+    s = sub.add_parser("ask", help="ask a relationship question about a processed document")
+    s.add_argument("doc", help="DOC_xxx.json")
+    s.add_argument("question", help="find | entity | owner | section | related | evidence")
+    s.add_argument("args", nargs="*")
+    s.set_defaults(func=_cmd_ask)
+
+    s = sub.add_parser("scan-template", help="map the fields of a fillable reference form")
+    s.add_argument("reference")
+    s.add_argument("-o", "--output", default=None)
+    s.set_defaults(func=_cmd_scan)
+
+    s = sub.add_parser("samples", help="regenerate the sample PDFs")
+    s.add_argument("--out", default="samples")
+    s.add_argument("--no-reference", action="store_true", help="do not rewrite the bundled reference form")
+    s.set_defaults(func=_cmd_samples)
+
+    args = p.parse_args(argv)
+    return args.func(args)

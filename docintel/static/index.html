@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>docintel</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%237c8cff'/%3E%3Cpath d='M16 7l8 9-8 9-8-9z' fill='white'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">
+      <span class="logo" aria-hidden="true"><svg viewBox="0 0 32 32"><path d="M16 7l8 9-8 9-8-9z"/></svg></span>
+      <span class="name">docintel</span>
+      <span class="tagline">relationship-aware intake extraction</span>
+    </div>
+    <button class="btn primary" id="uploadBtn" type="button">Upload PDFs</button>
+    <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden>
+  </header>
+
+  <div class="app">
+    <aside class="sidebar">
+      <div class="dropzone" id="dropzone" role="button" tabindex="0">
+        <strong>Drop PDFs here</strong>
+        <span>or click to choose · each file is processed on its own</span>
+      </div>
+      <div class="sidehead"><span>Documents</span><span id="docCount">0</span></div>
+      <nav class="doclist" id="docList" aria-label="Documents"></nav>
+    </aside>
+
+    <main class="main" id="main">
+      <div class="empty" id="emptyState" hidden>
+        <h2>No documents yet</h2>
+        <p>Drop patient intake PDFs on the left. Each one is read, structured and validated in about a second.</p>
+      </div>
+      <div id="docView" hidden>
+        <section class="dochead">
+          <div class="dochead-text">
+            <div class="docid"><span id="hId"></span><span id="hStatus" class="badge"></span></div>
+            <h1 id="hName"></h1>
+            <div class="meta" id="hMeta"></div>
+          </div>
+          <div class="actions">
+            <button class="btn" id="ocrBtn" type="button" hidden>Run OCR</button>
+            <a class="btn" id="dlJson" href="#">Download JSON</a>
+            <a class="btn" id="dlStd" href="#" target="_blank" rel="noopener">Standardized PDF</a>
+            <a class="btn" id="dlSrc" href="#" target="_blank" rel="noopener">Source PDF</a>
+            <button class="btn danger" id="delBtn" type="button">Delete</button>
+          </div>
+        </section>
+
+        <section class="stats" id="stats"></section>
+
+        <div class="workspace">
+          <section class="panel left">
+            <div class="tabs" role="tablist" id="tabs"></div>
+            <div class="tabbody" id="tabBody"></div>
+          </section>
+
+          <section class="panel viewer">
+            <div class="viewbar">
+              <div class="seg" role="tablist">
+                <button type="button" data-view="source" class="on">Source</button>
+                <button type="button" data-view="standardized">Standardized</button>
+              </div>
+              <div class="legend"><span class="lg value"></span>value<span class="lg label"></span>label / heading</div>
+              <div class="pager">
+                <button type="button" class="icon" id="prevPage" aria-label="Previous page">‹</button>
+                <span id="pageLabel">Page 1 / 1</span>
+                <button type="button" class="icon" id="nextPage" aria-label="Next page">›</button>
+              </div>
+            </div>
+            <div class="trace" id="trace"></div>
+            <div class="pagewrap" id="pageWrap">
+              <div class="page" id="page">
+                <img id="pageImg" alt="">
+                <div class="overlay" id="overlay"></div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+  <div class="dragmask" id="dragmask"><div>Drop PDFs to process them</div></div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
