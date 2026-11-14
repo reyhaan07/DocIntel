@@ -1,0 +1,79 @@
+{
+ "document": "intake_Q_written_lists.pdf",
+ "document_type": "patient intake",
+ "values": {
+  "Agreement[Consent for Treatment].date": "2026-05-14",
+  "Agreement[Consent for Treatment].signature": "/s/ Grace Okonkwo",
+  "Agreement[Consent for Treatment].title": "Consent for Treatment",
+  "Allergy[Penicillin].allergen": "Penicillin",
+  "Allergy[Penicillin].reaction": "hives",
+  "Allergy[Sulfa drugs].allergen": "Sulfa drugs",
+  "Allergy[Sulfa drugs].reaction": "rash",
+  "EmergencyContact.full_name": "Samuel Okonkwo",
+  "EmergencyContact.phone": "(614) 555-0183",
+  "EmergencyContact.relationship": "husband",
+  "Medication[Lisinopril].dosage": "10 mg",
+  "Medication[Lisinopril].frequency": "daily",
+  "Medication[Lisinopril].name": "Lisinopril",
+  "Medication[Metformin].dosage": "500 mg",
+  "Medication[Metformin].frequency": "twice daily",
+  "Medication[Metformin].name": "Metformin",
+  "Medication[Vitamin D].name": "Vitamin D",
+  "Patient.date_of_birth": "1962-11-09",
+  "Patient.first_name": "Grace",
+  "Patient.full_name": "Grace Okonkwo",
+  "Patient.last_name": "Okonkwo",
+  "Patient.phone": "(614) 555-0182",
+  "Surgery[Appendectomy].procedure": "Appendectomy",
+  "Surgery[Appendectomy].year": "1988",
+  "Surgery[Knee arthroscopy].procedure": "Knee arthroscopy",
+  "Surgery[Knee arthroscopy].year": "2019"
+ },
+ "relationships": [
+  [
+   "Patient",
+   "HAD_SURGERY",
+   "Surgery[Appendectomy]"
+  ],
+  [
+   "Patient",
+   "HAD_SURGERY",
+   "Surgery[Knee arthroscopy]"
+  ],
+  [
+   "Patient",
+   "HAS_ALLERGY",
+   "Allergy[Penicillin]"
+  ],
+  [
+   "Patient",
+   "HAS_ALLERGY",
+   "Allergy[Sulfa drugs]"
+  ],
+  [
+   "Patient",
+   "HAS_EMERGENCY_CONTACT",
+   "EmergencyContact"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Consent for Treatment]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Lisinopril]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Metformin]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Vitamin D]"
+  ]
+ ]
+}

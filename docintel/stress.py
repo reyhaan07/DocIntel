@@ -283,7 +283,9 @@ def generate_stress(out_dir: str | Path = "samples/stress") -> list[Path]:
 
     scan = out / "scan_P_real_world.pdf"  # N on paper: symbol boxes and choices read from the image
     make_scanned(n, scan, seed=11, angles=[1.1, -0.8])
-    files += [f, g, h, i, j, k, enc, m, n, o, scan]
+    q = out / "intake_Q_written_lists.pdf"
+    make_written_lists(q)
+    files += [f, g, h, i, j, k, enc, m, n, o, scan, q]
     return files
 
 
@@ -440,5 +442,44 @@ def make_right_aligned_invoice(path):
         rtext(a, right["Amount"], y)
     p.heading("TOTALS", 262, X, RR, color=TEAL, size=11)
     _kv(p, "Total Due", "$524.50", X + 330, 290)
+    c.showPage()
+    c.save()
+
+
+# --------------------------------------------------------------------------- Q: lists written as text
+def make_written_lists(path):
+    """A short clinic form where allergies, medications and surgeries are written on a
+    line instead of in a table, with an instruction line in between."""
+    c = canvas.Canvas(str(path), pagesize=letter)
+    c.setTitle("Lakeside Family Practice")
+    p = _Pen(c, "flattened", {})
+    NAVY = HexColor("#24345c")
+
+    def head(s, top):
+        p.text(s, X, top + 11, size=11, bold=True, color=NAVY)
+
+    p.text("LAKESIDE FAMILY PRACTICE", X, 56, size=15, bold=True, color=NAVY)
+    head("PATIENT INFORMATION", 74)
+    p.text("Patient Name: Grace Okonkwo", X, 110, size=9.5)
+    p.text("Date of Birth: 11/09/1962", X + 280, 110, size=9.5)
+    p.text("Phone: (614) 555-0182", X, 126, size=9.5)
+    p.text("Drug Allergies: Penicillin (hives), Sulfa drugs (rash)", X, 142, size=9.5)
+
+    head("CURRENT MEDICATIONS", 162)
+    p.text("Please list every medicine you take, including vitamins.", X, 196, size=8.5, color=GRAY)
+    p.text("Medications: Lisinopril 10 mg daily; Metformin 500 mg twice daily; Vitamin D", X, 212, size=9.5)
+
+    head("SURGICAL HISTORY", 232)
+    p.text("Appendectomy (1988), Knee arthroscopy (2019)", X, 266, size=9.5)
+
+    head("EMERGENCY CONTACT", 286)
+    p.text("Name: Samuel Okonkwo", X, 320, size=9.5)
+    p.text("Relationship: Husband", X + 200, 320, size=9.5)
+    p.text("Phone: (614) 555-0183", X + 360, 320, size=9.5)
+
+    head("CONSENT TO TREAT", 340)
+    p.text("I consent to examination and treatment.", X, 374, size=8.5, color=GRAY)
+    p.text("Signature: /s/ Grace Okonkwo", X, 394, size=9.5)
+    p.text("Date: 05/14/2026", X + 300, 394, size=9.5)
     c.showPage()
     c.save()

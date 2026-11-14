@@ -238,3 +238,19 @@ def test_right_aligned_numbers_and_two_line_header():
     pip = rows["Pipette tips, 1000 uL (case)"]
     assert (pip["qty"]["value"], pip["unit_price"]["value"], pip["amount"]["value"]) == ("3", "$84.00", "$252.00")
     assert rows["Centrifuge tubes, 15 mL"]["unit_price"]["value"] == "$0.85"
+
+
+# --------------------------------------------------------------------------- Q: lists written as text
+def test_lists_written_on_a_line():
+    doc = process_pdf(STRESS / "intake_Q_written_lists.pdf", ocr=False)
+    meds = {e["label"]: e["attributes"] for e in doc["entities"].values() if e["type"] == "Medication"}
+    assert set(meds) == {"Lisinopril", "Metformin", "Vitamin D"}  # the instruction line is not a medication
+    assert (meds["Metformin"]["dosage"]["value"], meds["Metformin"]["frequency"]["value"]) == ("500 mg", "twice daily")
+    assert meds["Lisinopril"]["name"]["extraction_method"] == "layout_list"
+    algs = {e["label"]: e["attributes"] for e in doc["entities"].values() if e["type"] == "Allergy"}
+    assert algs["Penicillin"]["reaction"]["value"] == "hives" and algs["Sulfa drugs"]["reaction"]["value"] == "rash"
+    assert all(a["status"] == "valid" for x in (meds, algs) for e in x.values() for a in e.values())
+    # surgeries under the heading carry no label: read, but sent for review
+    surg = {e["label"]: e["attributes"] for e in doc["entities"].values() if e["type"] == "Surgery"}
+    assert surg["Knee arthroscopy"]["year"]["value"] == "2019" and surg["Knee arthroscopy"]["year"]["status"] == "needs_review"
+    assert any("gives no Prescribing Doctor" in m["reason"] for m in doc["missing"])

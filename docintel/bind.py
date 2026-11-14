@@ -107,6 +107,10 @@ def _parse_kv_line(tokens: list[Token], table) -> list[tuple[dict | None, list[T
                     labels.append((i, end, spec))
                     i = end
                     continue
+            if (t.text.endswith(":") and t.source == "ocr" and t.text[:1].islower() and labels and i > 0
+                    and tokens[i - 1].kind == "word" and t.x0 - tokens[i - 1].x1 < 0.6 * t.height):
+                i += 1  # OCR reads ';' as ':' - "10 mg daily: Metformin" continues the value
+                continue
             if t.text.endswith(":") and len(t.text) > 1 and not re.search(r"\d:\d", t.text):
                 start = i
                 floor = labels[-1][1] if labels else 0
@@ -164,6 +168,65 @@ def _hint_conflict(raw: str, order: str) -> bool:
     a, b = int(m.group(1)), int(m.group(2))
     month = a if order == "mdy" else b
     return month > 12
+
+
+_LIST_PROMPT = re.compile(r"\b(list|please list|if yes|specify|describe|name them)\b", re.I)
+_INSTRUCTION = re.compile(r"\b(please|list|include|including|if|you|your|below|above|attach|check|circle|"
+                          r"complete|provide|describe|indicate|write)\b", re.I)
+_DOSE_START = re.compile(r"\s(?=\d[\d.,/]*\s*(?:mg|mcg|g|ml|iu|units?|puffs?|tabs?|tablets?|caps?|capsules?|drops?|%|meq|mmol)\b)",
+                         re.I)
+
+
+def _list_items(words: list[Token]) -> list[list[Token]]:
+    """Split a written list into items at commas, semicolons and bullets."""
+    items: list[list[Token]] = []
+    cur: list[Token] = []
+    for t in words:
+        txt = t.text
+        if txt in ("•", "·", "-", "–", ";", ",") or re.fullmatch(r"\d{1,2}[.)]", txt):
+            if cur:
+                items.append(cur)
+            cur = []
+            continue
+        cur.append(t)
+        if txt.endswith((",", ";")) or (t.source == "ocr" and txt.endswith(":")):  # OCR: ';' read as ':'
+            items.append(cur)
+            cur = []
+    if cur:
+        items.append(cur)
+    return items
+
+
+def _parse_list_item(etype: str, text: str) -> tuple[dict, bool]:
+    """One written item -> (column values, parsed with confidence)."""
+    text = re.sub(r"^[•·\-–\d.)\s]+(?=[A-Za-z])", "", text).strip()
+    if not text:
+        return {}, False
+    if etype == "Medication":
+        m = _DOSE_START.search(" " + text)
+        if not m:
+            ok = not re.search(r"\d", text)  # a name without a dose; digits elsewhere are unexplained
+            return {"name": text}, ok
+        name, rest = text[:m.start()].strip(), text[m.start():].strip()
+        dose, freq, ok = split_dose_frequency(rest)
+        return {"name": name, "dosage": dose, "frequency": freq}, ok and bool(re.search(r"[A-Za-z]", name))
+    if etype == "Allergy":
+        m = re.fullmatch(r"(?P<a>[^()\-–:]+?)\s*(?:\((?P<r>[^)]*)\)|[-–:]\s*(?P<r2>.+))?", text)
+        if not m:
+            return {"allergen": text}, False
+        return {"allergen": m.group("a").strip(), "reaction": (m.group("r") or m.group("r2") or "").strip() or None}, True
+    if etype == "Surgery":
+        m = re.fullmatch(r"(?P<p>.+?)[\s,(-]*(?:in\s+)?(?P<y>(?:19|20)\d{2})?\)?", text)
+        if not m:
+            return {"procedure": text}, False
+        return {"procedure": m.group("p").strip(" ,(-"), "year": m.group("y")}, True
+    return {}, False
+
+
+def _tokens_for(tokens: list[Token], value: str) -> list[Token]:
+    """The tokens of an item that print a given part of it."""
+    words = set(re.sub(r"[^\w%./-]+", " ", value.lower()).split())
+    return [t for t in tokens if re.sub(r"[^\w%./-]+", " ", t.text.lower()).strip() in words]
 
 
 def choice_value(vtoks: list[Token]):
@@ -225,6 +288,7 @@ class Binder:
         self.continued: set[int] = set()  # tokens joined to a value from the following line
         self._unclear_lines: set[int] = set()  # yes/no lines where a box or an answer was not readable
         self.none_answers: dict[str, Attribute] = {}  # section key -> "NKDA"/"None" written in its table
+        self.bound_ids: set[int] = set()  # tokens already read into an inline list
         # day/month order of numeric dates, decided once for the whole document
         self.date_order = infer_date_order([t.text for p in pages for t in p.tokens if t.kind == "word"])
         self.parse_order = "dmy" if self.date_order == "dmy" else "mdy"
@@ -499,6 +563,8 @@ class Binder:
                 ent = self._row_entity(spec, espec, region, table, row, rowno)
                 if ent:
                     made.append(ent)
+        if not made and not self.scan and spec["key"] not in self.none_answers and spec.get("inline_list", True):
+            made = self._inline_list(spec, regions)
         none = self.none_answers.get(spec["key"])
         if none is not None and made:
             none.status = "needs_review"
@@ -561,6 +627,99 @@ class Binder:
             labels = ", ".join(c.get("label", c["key"]) for c in missing_cols)
             self.add_missing("incomplete_record", ent.id, labels, f"record {rowno} has no value for: {labels}", ent.id, region)
         return ent
+
+    # ------------------------------------------------------------------ lists written as text
+    def _inline_list(self, spec, regions) -> list[Entity]:
+        """A table section answered as text: "Allergies: Penicillin (hives), Sulfa (rash)",
+        "Medications: Lisinopril 10 mg daily; Metformin 500 mg twice daily".  Read from a
+        label that names the section (anywhere on the form) or from a list prompt inside
+        the section.  Lines without a label under the heading are read too, but only for
+        review: free text may be instructions rather than an answer."""
+        aliases = [norm_tokens(a) for a in [spec["name"], *spec.get("aliases", [])]]
+        found: list[tuple[Region, list[Token], list[Token], bool]] = []
+        seen: set[int] = set()
+        own_regions = {r.region_id for r in regions}
+
+        def names_section(label_toks) -> bool:
+            words = norm_tokens(" ".join(t.text for t in label_toks))
+            return any(words[i:i + len(a)] == a for a in aliases for i in range(len(words) - len(a) + 1))
+
+        for region in self.regions:
+            own = region.region_id in own_regions
+            if not own and region.key.startswith("other:"):
+                continue
+            lines = self.lines(region)
+            for k, ln in enumerate(lines):
+                if id(ln) in seen:
+                    continue
+                pairs = _parse_kv_line(ln.tokens, [])
+                for n, (_, ltoks, vtoks) in enumerate(pairs):
+                    words = [t for t in vtoks if t.kind == "word"]
+                    if not words or any(t.kind == "checkbox" for t in vtoks) or any(id(t) in self.bound_ids for t in words):
+                        continue
+                    if names_section(ltoks) or (own and _LIST_PROMPT.search(" ".join(t.text for t in ltoks))):
+                        right = pairs[n + 1][1][0].x0 - 4 if n + 1 < len(pairs) else region.x1
+                        extra = [t for t in continuation_tokens(lines, k, words, right) if t.kind == "word"]
+                        found.append((region, ltoks, words + extra, True))
+                        seen.add(id(ln))
+                if own and not pairs and id(ln) not in seen:
+                    words = [t for t in ln.tokens if t.kind == "word"]
+                    text = " ".join(t.text for t in words)
+                    if words and not _INSTRUCTION.search(text) and not text.rstrip().endswith((".", ":", "?")):
+                        found.append((region, [], words, False))
+                        seen.add(id(ln))
+        made: list[Entity] = []
+        espec = spec["entity"]
+        key_col = next(c for c in spec["columns"] if c.get("row_key"))
+        for region, ltoks, words, labelled in found:
+            raw_all = clean(join_tokens(words))
+            nothing = none_answer(raw_all)
+            if nothing:
+                akey = f"{spec['key']}_status"
+                if akey not in self.patient.attributes:
+                    attr = self.make_attr(nothing, ltoks, words, "key_value", region, raw=raw_all, label=spec["name"])
+                    attr.notes.append(f"'{raw_all}' written for {spec['name']}: none reported")
+                    self.patient.attributes[akey] = attr
+                    self.none_answers[spec["key"]] = attr
+                continue
+            for item_toks in _list_items(words):
+                text = clean(join_tokens(item_toks)).strip(" ,;.")
+                parts, ok = _parse_list_item(espec["type"], text)
+                if not parts or not parts.get(key_col["key"]):
+                    continue
+                rowno = len(made) + 1
+                ent = self.new_entity(espec["type"], espec["prefix"], parts[key_col["key"]], region, espec["group"],
+                                      row=rowno)
+                ent.extra["row_bbox"] = bbox_of(item_toks)
+                for key, value in parts.items():
+                    if not value:
+                        continue
+                    cspec = next((c for c in spec["columns"] if c["key"] == key), {"type": "text"})
+                    ptoks = _tokens_for(item_toks, value) or item_toks
+                    norm_value, vok = normalise(value, cspec.get("type", "text"), self.parse_order)
+                    attr = self.make_attr(norm_value, ltoks, ptoks, "key_value", region, raw=value, row=rowno,
+                                          label=label_text(" ".join(t.text for t in ltoks)) if ltoks else spec["name"])
+                    attr.extraction_method = attr.extraction_method.replace("key_value", "list")
+                    _type_notes(attr, value, norm_value, vok, cspec.get("type", "text"), self.date_order)
+                    attr.notes.append(f"item {rowno} of the list '{text if len(text) < 60 else text[:57] + '...'}'")
+                    if not ok:
+                        attr.status = "needs_review"
+                        attr.notes.append(f"'{text}' could not be split into its parts with confidence")
+                    if not labelled:
+                        attr.status = "needs_review"
+                        attr.notes.append(f"read from text under the '{region.heading}' heading, which has no label; "
+                                          "confirm it is an answer and not an instruction")
+                    if any(id(t) in self.continued for t in ptoks):
+                        attr.status = "needs_review"
+                    ent.attributes[key] = attr
+                self.bound_ids.update(id(t) for t in item_toks)
+                made.append(ent)
+                missing_cols = [c for c in spec["columns"] if c.get("required") and c["key"] not in ent.attributes]
+                if missing_cols:
+                    labels = ", ".join(c.get("label", c["key"]) for c in missing_cols)
+                    self.add_missing("incomplete_record", ent.id, labels,
+                                     f"list item {rowno} ('{text}') gives no {labels}", ent.id, region)
+        return made
 
     def _combined_cell(self, ent: Entity, cspec, htoks, cell: Cell, region, rowno, raw):
         """One printed column holding two fields ("Dose/Frequency"): split the value."""
