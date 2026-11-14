@@ -50,10 +50,10 @@ def _cmd_process(args) -> int:
     from .store import write_batch_files
 
     from .generic import blocks_to_markdown
-    from .pipeline import IMAGE_TYPES, process_file
+    from .pipeline import process_file, supported_suffixes
 
     src = Path(args.input)
-    files = sorted(f for f in src.iterdir() if f.suffix.lower() in {".pdf", *IMAGE_TYPES}) if src.is_dir() else [src]
+    files = sorted(f for f in src.iterdir() if f.suffix.lower() in supported_suffixes()) if src.is_dir() else [src]
     if not files:
         print(f"no PDF files found in {src}", file=sys.stderr)
         return 1

@@ -43,7 +43,7 @@ def test_upload_ask_delete(client, samples_dir):
     res = r.json()["documents"][0]
     assert res["doc_id"] == "DOC_003" and res["status"] == "completed"
     bad = client.post("/api/documents", files=[("files", ("x.pdf", b"hello", "application/pdf"))]).json()
-    assert bad["documents"][0]["error"] == "not a PDF or image file"
+    assert bad["documents"][0]["error"].startswith("not a supported file")
 
     a = client.get("/api/documents/DOC_002/ask", params={"q": "find", "a": "hypertension"}).json()
     assert {x["owner"] for x in a["answer"]} == {"Maria Rivera", "Mother"}

@@ -13,7 +13,7 @@ def clean(text: str | None) -> str:
 
 
 def label_text(text: str) -> str:
-    return clean(text).rstrip(":?").strip()
+    return clean(text).lstrip("•·▪◦‣-* ").rstrip(":?").strip()
 
 
 _NUM_DATE = re.compile(r"(?<![\d/.-])(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})(?![\d/.-])")

@@ -166,11 +166,11 @@ def evaluate_folder(input_dir: str | Path, truth_dir: str | Path, ocr="auto") ->
     file for a file holding several forms lists one truth per form under "packets"."""
     import tempfile
 
-    from .pipeline import IMAGE_TYPES, process_file
+    from .pipeline import process_file, supported_suffixes
 
     input_dir, truth_dir = Path(input_dir), Path(truth_dir)
     reports = []
-    for src in sorted(f for f in input_dir.iterdir() if f.suffix.lower() in {".pdf", *IMAGE_TYPES}):
+    for src in sorted(f for f in input_dir.iterdir() if f.suffix.lower() in supported_suffixes()):
         tfile = truth_dir / f"{src.stem}.json"
         if not tfile.exists():
             continue

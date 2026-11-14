@@ -1,0 +1,21 @@
+{
+  "invoice_number": "INV-20931",
+  "invoice_date": "2026-03-14",
+  "bill_to": {
+    "name": "Riverside Family Clinic",
+    "city": "Springfield"
+  },
+  "items": [
+    {
+      "description": "Nitrile gloves (box)",
+      "qty": 12,
+      "amount": "$102.00"
+    },
+    {
+      "description": "Sharps container",
+      "qty": 4,
+      "amount": "$57.00"
+    }
+  ],
+  "total_due": "$307.80"
+}

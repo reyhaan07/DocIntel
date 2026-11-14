@@ -242,9 +242,12 @@ def validate(binder: Binder, rels: list[Relationship], template: Template, struc
         for region, words in structure.text:
             top = min(t.top for t in words)
             above = [y for y in tops.get(region.region_id, []) if y < top - 2]
+            below = [y for y in tops.get(region.region_id, []) if y > top + 2]
             short = len(words) <= 6
             known = not region.key.startswith("other:")
-            if above and (short or (template_used and known)):
+            # on a known form any loose text after data is suspect; elsewhere only text set
+            # *between* data (a letter's "Thanks," after its details is just a letter)
+            if above and ((template_used and (short or known)) or (short and below)):
                 text = " ".join(t.text for t in words)
                 issues.append(issue(f"page {region.page}", f"text '{text[:60]}' in section '{region.name}' is not "
                                                           f"attached to any field"))

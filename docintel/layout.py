@@ -357,8 +357,8 @@ def _kv_split_lines(lines: list[Line]):
         # the label/value split is the widest gap on the line; a second wide gap means more columns
         gaps = [(toks[i + 1].x0 - toks[i].x1, i + 1) for i in range(len(toks) - 1)]
         widest = max(gaps)
-        if widest[0] < 12 or sum(1 for g, _ in gaps if g >= 30) > 1:
-            continue
+        if widest[0] < 12 or sum(1 for g, _ in gaps if g >= max(12.0, 0.4 * widest[0])) > 1:
+            continue  # more than one wide gap: a row of three or more columns, not label | value
         segs = [toks[:widest[1]], toks[widest[1]:]]
 
         def label_like(t):  # OCR reads ';' as ':' - "Heart disease: Arthritis" is still one value
@@ -427,7 +427,8 @@ def kv_table(lines: list[Line], boxes: list | None = None, columns: tuple[float,
         lab = [t for t in ln.tokens if t.x0 < xv - 3]
         val = [t for t in ln.tokens if t.x0 >= xv - 3]
         gaps = [ln.tokens[i + 1].x0 - ln.tokens[i].x1 for i in range(len(ln.tokens) - 1)]
-        if sum(1 for g in gaps if g >= 30) > 1:  # three or more columns: a table row, not label | value
+        wide = max(gaps) if gaps else 0
+        if sum(1 for g in gaps if g >= max(12.0, 0.4 * wide)) > 1:  # three or more columns: a table row
             if started:
                 break
             continue

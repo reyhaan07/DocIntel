@@ -149,6 +149,13 @@ def write_pages(src: str | Path, numbers: list[int], dest: str | Path) -> Path:
 IMAGE_TYPES = {".png", ".jpg", ".jpeg", ".tif", ".tiff", ".bmp", ".gif", ".webp"}
 
 
+def supported_suffixes() -> set[str]:
+    """Every file type docintel reads: PDF, images, and office/web/text formats."""
+    from .convert import FORMATS
+
+    return {".pdf", *IMAGE_TYPES, *FORMATS}
+
+
 def is_pdf(path: str | Path) -> bool:
     with open(path, "rb") as fh:
         return fh.read(1024).lstrip().startswith(b"%PDF")
@@ -212,9 +219,19 @@ def process_file(path: str | Path, target, *, filename: str | None = None, templ
     template = template or load_template()
     filename = filename or path.name
     work = Path(tempfile.mkdtemp(prefix="docintel-"))
+    source_format = "pdf"
     try:
         if not is_pdf(path):
-            path = image_to_pdf(path, work / "converted.pdf")
+            from .convert import can_convert, convert_to_pdf, describe
+
+            if can_convert(path):
+                # office, web, e-mail and text files are laid out as a PDF of their structure
+                source_format = path.suffix.lower().lstrip(".")
+                kind = describe(path)
+                path = convert_to_pdf(path, work / "converted.pdf")
+            else:
+                source_format, kind = "image", "image"
+                path = image_to_pdf(path, work / "converted.pdf")
         pages = read_pdf(path, ocr=ocr)
         rotations = {p.number: p.rotation for p in pages if p.rotation}
         if rotations:
@@ -232,6 +249,7 @@ def process_file(path: str | Path, target, *, filename: str | None = None, templ
                     shutil.copyfile(path, src)
                 doc = process_pdf(src, tgt["doc_id"], filename=filename, template=template, ocr=ocr,
                                   standardized_path=tgt.get("standardized_path"), pages=pages)
+                _mark_source(doc, source_format, locals().get("kind"))
                 docs.append(doc)
                 continue
             src = write_pages(path, group, tgt["source_path"])
@@ -240,10 +258,20 @@ def process_file(path: str | Path, target, *, filename: str | None = None, templ
                               standardized_path=tgt.get("standardized_path"), pages=_subset(pages, group))
             doc["document"]["packet"] = {"index": k, "count": len(groups), "source_file": filename,
                                          "source_pages": group, "source_sha256": sha256_file(path)}
+            _mark_source(doc, source_format, locals().get("kind"))
             docs.append(doc)
         return docs
     finally:
         shutil.rmtree(work, ignore_errors=True)
+
+
+def _mark_source(doc: dict, source_format: str, kind: str | None) -> None:
+    """Say what the upload was; a converted file's pages are its layout, not a scan."""
+    d = doc["document"]
+    d["source_format"] = source_format
+    if source_format not in ("pdf", "image"):
+        d["converted_from"] = kind or source_format
+        d["extraction_method"] = f"converted from {kind or source_format}"
 
 
 def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | None = None,

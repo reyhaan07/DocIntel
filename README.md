@@ -110,6 +110,21 @@ No doctor is invented for a row that has none; the gap is reported as missing.
 | A value that reads like a label on a scan (`Date`, `Authorized Signature`, `Total Contract`) | Most likely the next label over an empty box: sent for review |
 | `+44 20 7946 0958`, `0049 30 1234567`, `ext. 12` | International numbers kept as written (never re-grouped as US numbers); extensions kept |
 
+## File types
+
+| kind | formats | how it is read |
+|---|---|---|
+| PDF | `.pdf` (digital, fillable, flattened, scanned, encrypted without password) | text layer, form fields, drawn boxes and ink; OCR for scanned pages |
+| Images | `.png .jpg .jpeg .tif .tiff .bmp .gif .webp` | OCR, straightened and turned upright |
+| Office | `.docx .xlsx .pptx` and OpenDocument `.odt .ods .odp` | headings, paragraphs, tables, lists and tick boxes read from the file itself |
+| Web and e-mail | `.html .htm .eml` | headings, paragraphs, tables, form inputs with their labels, definition lists; e-mail headers, body and attachment names |
+| Text and data | `.txt .md .rtf .csv .tsv .json .xml` | Markdown headings and pipe tables, RTF tables, delimited tables, nested JSON as labelled values and tables |
+
+Every non-PDF file is laid out as a clean PDF of its structure (headings larger and bold,
+`Label: value` lines, ruled tables). The same reading rules then apply to every
+format, and every value still points at a box on a page in the viewer. All readers are
+pure Python (standard library); nothing is sent anywhere.
+
 ## Quick start
 
 ```bash

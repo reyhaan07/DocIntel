@@ -484,7 +484,7 @@ class Binder:
                 # a short table (one or two rows) takes its columns from the rest of the page,
                 # and every row must then be a known field
                 cols = self.page_kv_columns(region.page)
-                if cols:
+                if cols and len(lines) <= 4:  # only a short section borrows the page's columns
                     short = kv_table(lines, boxes, columns=cols, min_rows=1)
                     body = [r for r in short if not r.header and r.label]
                     covered = sum(len(r.lines) for r in short) == len(lines)  # every line sits in the page's columns

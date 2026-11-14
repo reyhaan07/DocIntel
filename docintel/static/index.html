@@ -15,14 +15,14 @@
       <span class="tagline">relationship-aware document extraction</span>
     </div>
     <button class="btn primary" id="uploadBtn" type="button">Upload files</button>
-    <input type="file" id="fileInput" accept="application/pdf,.pdf,image/png,image/jpeg,image/tiff,.png,.jpg,.jpeg,.tif,.tiff" multiple hidden>
+    <input type="file" id="fileInput" accept=".pdf,.png,.jpg,.jpeg,.tif,.tiff,.bmp,.gif,.webp,.docx,.xlsx,.pptx,.odt,.ods,.odp,.html,.htm,.eml,.txt,.md,.csv,.tsv,.json,.rtf,.xml" multiple hidden>
   </header>
 
   <div class="app">
     <aside class="sidebar">
       <div class="dropzone" id="dropzone" role="button" tabindex="0">
-        <strong>Drop PDFs or scans here</strong>
-        <span>or click to choose · PDF, PNG, JPG, TIFF · each file is processed on its own</span>
+        <strong>Drop documents here</strong>
+        <span>or click to choose · PDF, scans and photos, Word, Excel, PowerPoint, OpenDocument, HTML, e-mail, text, CSV, JSON · each file is processed on its own</span>
       </div>
       <div class="sidehead"><span>Documents</span><span id="docCount">0</span></div>
       <nav class="doclist" id="docList" aria-label="Documents"></nav>

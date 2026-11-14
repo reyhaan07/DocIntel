@@ -18,9 +18,13 @@ from .store import Store
 STATIC = Path(__file__).parent / "static"
 
 
-def _supported(data: bytes) -> bool:
-    """PDF, or an image Pillow can open (PNG, JPEG, TIFF, BMP, GIF, WebP)."""
+def _supported(data: bytes, name: str = "") -> bool:
+    """PDF, an image Pillow can open, or an office/web/e-mail/text file by its extension."""
     if data.lstrip()[:5].startswith(b"%PDF"):
+        return True
+    from .convert import can_convert
+
+    if name and can_convert(name):
         return True
     import io
 
@@ -66,8 +70,9 @@ def create_app(data_dir: str | Path = "docintel_data", seed: str | Path | None =
             if len(data) > MAX_UPLOAD:
                 results.append({"filename": name, "error": "file is larger than 25 MB"})
                 continue
-            if not _supported(data):
-                results.append({"filename": name, "error": "not a PDF or image file"})
+            if not _supported(data, name):
+                results.append({"filename": name, "error": "not a supported file (PDF, image, Word, Excel, "
+                                                           "PowerPoint, OpenDocument, HTML, e-mail, text, CSV, JSON, RTF)"})
                 continue
             from starlette.concurrency import run_in_threadpool
 

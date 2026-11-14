@@ -1,0 +1,31 @@
+From: Billing <billing@harborlab.example>
+To: clinic@riverside.example
+Subject: Invoice INV-20931
+Date: Sat, 14 Mar 2026 10:00:00 +0000
+MIME-Version: 1.0
+Content-Type: multipart/mixed; boundary="===============7524947602702020114=="
+
+--===============7524947602702020114==
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+
+Hello,
+
+Please find invoice INV-20931 attached.
+
+Invoice Number: INV-20931
+Total Due: $307.80
+Due Date: 04/13/2026
+
+Thanks,
+Harbor Lab Supply
+
+--===============7524947602702020114==
+Content-Type: application/pdf
+Content-Transfer-Encoding: base64
+Content-Disposition: attachment; filename="INV-20931.pdf"
+MIME-Version: 1.0
+
+JVBERi0xLjQgZmFrZQ==
+
+--===============7524947602702020114==--

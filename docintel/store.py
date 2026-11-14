@@ -221,10 +221,10 @@ class Store:
             return self.page_image(doc_id, kind, page).read_bytes()
 
     def seed(self, folder: str | Path, progress=None) -> list[dict]:
-        from .pipeline import IMAGE_TYPES
+        from .pipeline import supported_suffixes
 
         out = []
-        files = sorted(f for f in Path(folder).iterdir() if f.suffix.lower() in {".pdf", *IMAGE_TYPES})
+        files = sorted(f for f in Path(folder).iterdir() if f.suffix.lower() in supported_suffixes())
         for i, pdf in enumerate(files, start=1):
             if progress:
                 progress(f"processing sample {i}/{len(files)}: {pdf.name}")

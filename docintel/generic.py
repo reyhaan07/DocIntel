@@ -204,6 +204,9 @@ def _generic_table(lines: list[Line], region: Region, start: int, binder_boxes: 
             break
         rtoks = [t for l in row.lines for t in l.tokens if t.kind == "word"]
         rtext = join_tokens(rtoks)
+        if rows and rtoks and rtoks[0].text.endswith(":") or (rows and len(rtoks) > 1 and rtoks[1].text.endswith(":")
+                                                               and rtoks[0].x1 + 5 > rtoks[1].x0):
+            break  # "Subtotal: $285.00" - labelled values follow the table
         letters = re.sub(r"[^A-Za-z]", "", rtext)
         filled = sum(1 for c in row.cells.values() if c.text)
         if rows and filled == 1 and letters.isupper() and len(rtoks) <= 4 and not re.search(r"\d", rtext):
@@ -219,6 +222,9 @@ def _generic_table(lines: list[Line], region: Region, start: int, binder_boxes: 
         gaps.append(gap)
         rows.append(row)
         prev_bottom = max(l.bottom for l in row.lines)
+    # lines after the table that fill one column only ("Totals", a closing line) are not rows
+    while rows and sum(1 for c in rows[-1].cells.values() if c.text) <= 1 and len(rows) > 1:
+        rows.pop()
     if not rows:
         return None
     # a table holds records: several rows that fill more than one column.  Rows of single
