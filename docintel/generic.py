@@ -683,10 +683,11 @@ def build_blocks(binder, st: Structure) -> list[dict]:
         paras.append((region, [words]))
     for region, lines in paras:
         add("text", region, [t for ln in lines for t in ln], text="\n".join(join_tokens(ln) for ln in lines))
-    furniture = [t for p in binder.pages for t in p.tokens if t.kind == "furniture"]
     from .layout import build_lines
 
-    for ln in build_lines([_as_word(t) for t in furniture]):
+    furniture_lines = [ln for p in binder.pages
+                       for ln in build_lines([_as_word(t) for t in p.tokens if t.kind == "furniture"])]
+    for ln in furniture_lines:
         blocks.append({"type": "page_furniture", "text": ln.text, "page": ln.page, "bbox": bbox_of(ln.tokens),
                        "section": None, "section_id": None,
                        "_key": (ln.page, -1 if ln.top < 400 else 10 ** 6, ln.top, ln.x0)})

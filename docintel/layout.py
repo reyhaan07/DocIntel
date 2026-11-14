@@ -56,7 +56,9 @@ def join_tokens(tokens) -> str:
         if not t.text:
             continue
         if prev is not None:
-            glued = (t.source == "ocr" and prev.source == "ocr" and t.x0 - prev.x1 < 0.25 * min(t.height, prev.height)
+            same_line = abs(t.cy - prev.cy) < 0.5 * min(t.height, prev.height)
+            gap = t.x0 - prev.x1
+            glued = (t.source == "ocr" and prev.source == "ocr" and same_line and -1 <= gap < 0.25 * min(t.height, prev.height)
                      and t.text[:1].isalnum() and prev.text[-1:].isalnum())
             out += "" if glued else " "
         out += t.text

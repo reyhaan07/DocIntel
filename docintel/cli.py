@@ -160,6 +160,11 @@ def _cmd_samples(args) -> int:
 
     for f in generate_all(Path(args.out) / "input", Path(args.out) / "upload", reference=not args.no_reference):
         print(f)
+    if args.stress:
+        from .stress import generate_stress
+
+        for f in generate_stress(Path(args.out) / "stress"):
+            print(f)
     return 0
 
 
@@ -212,6 +217,7 @@ def main(argv: list[str] | None = None) -> int:
     s = sub.add_parser("samples", help="regenerate the sample PDFs")
     s.add_argument("--out", default="samples")
     s.add_argument("--no-reference", action="store_true", help="do not rewrite the bundled reference form")
+    s.add_argument("--stress", action="store_true", help="also write the stress documents (samples/stress)")
     s.set_defaults(func=_cmd_samples)
 
     args = p.parse_args(argv)

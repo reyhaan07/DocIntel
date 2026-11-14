@@ -63,7 +63,8 @@ def _norm(v) -> str:
         return "<none>"
     if isinstance(v, list):
         return "|".join(sorted(_norm(x) for x in v))
-    return re.sub(r"[^a-z0-9%$<>]", "", str(v).lower())
+    # punctuation and case are cosmetic; word boundaries are not ("StreetUnit" is wrong)
+    return " ".join(re.sub(r"[^a-z0-9%$<> ]", "", str(v).lower()).split())
 
 
 def _similar(a: str, b: str) -> float:

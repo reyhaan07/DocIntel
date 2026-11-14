@@ -11,7 +11,8 @@ actually signed. docintel keeps that structure. Every value and every link can b
 back to the exact spot on the page it came from, and anything doubtful is flagged for a
 person instead of being guessed.
 
-It reads **any** PDF: fillable, flattened, scanned, from any layout. Documents of a known
+It reads **any** PDF (fillable, flattened or scanned, in any layout) as well as photos and scans
+as PNG, JPG or TIFF. Documents of a known
 type (today: patient intake packets) also get that type's meaning: patients, medications,
 policies, consents and the relationships between them. Every other document is read
 with the template-free structure: sections, fields, tables, check-box questions and
@@ -34,10 +35,37 @@ signature–agreement binding, and **text coverage** (every piece of text is acc
 for).
 
 **Uncertain, not guessed.** These are kept, marked uncertain and sent for review:
-a medication row whose text wraps onto the next line, a question with both *Yes* and
-*No* ticked, a signature whose printed name is someone else's, an OCR word read with low
-confidence, a value OCR had to correct. No doctor is invented for a row that has none;
-the gap is reported as missing.
+
+* a medication row whose text wraps onto the next line
+* a question with both *Yes* and *No* ticked, or an answer line where a box or its label could not be read
+* a signature whose printed name is someone else's
+* a value that does not fit its field (a phone number with letters, an impossible date)
+* a date like `03/04/2026` when nothing else on the document settles whether it is day-first
+* a value joined from two lines
+* text sitting between fields that belongs to no field
+* an OCR word read with low confidence, or a value OCR had to correct
+
+No doctor is invented for a row that has none; the gap is reported as missing.
+
+### Guards against silent errors
+
+| Situation | What docintel does |
+|---|---|
+| Two patients' forms scanned into one PDF | Splits them into separate documents (one per form). Read as one, the file fails validation: forms are never merged |
+| `Work Phone:` next to `Home Phone:` | A qualified label is a different field, never the patient's phone |
+| `Yes [X]  No [ ]` (labels before their boxes) | The label side is decided by spacing, which still holds when OCR drops a box |
+| `14/03/2026` and `05/04/1980` on one letter | The day/month order is decided once per document from unambiguous dates (or US phone/ZIP formats) |
+| `943 476 5919` labelled *NHS Number* | Typed by its label: an identifier, not a phone number |
+| Address on two lines | The second line is joined (and flagged) when it sits tight under the value, aligned with it |
+| Table continuing on the next page without a header | Read with the same columns, numbering carried on |
+| Labels printed above boxed values, or no colon | Read from the drawn boxes |
+| Fillable fields with no printed label | Named after the field's own description (tooltip) |
+| Running headers and footers | Recognised as page furniture and never read as data |
+| A heading the template does not know | Closes the section above it, so its values cannot leak into a known section |
+| Sideways or upside-down scans and photos | Turned upright before reading, and shown upright |
+| A scan whose hidden text layer is garbage | Detected and read again with OCR |
+| A scan embedded in a digital page | The embedded image is read with OCR as well |
+| Encrypted PDF | Opened when no password is needed; a clear error when one is |
 
 ## Quick start
 
@@ -61,14 +89,16 @@ python -m docintel ask output/DOC_003.json owner COND_006   # relationship quest
 python -m docintel evaluate samples/input                   # accuracy against ground truth
 python -m docintel truth output/DOC_003.json -o t.json      # export a checked result as ground truth
 python -m docintel scan-template <reference.pdf>            # map your real reference form
-python -m docintel samples                                  # regenerate the sample PDFs
+python -m docintel samples --stress                         # regenerate the sample (and stress) PDFs
 ```
 
 OCR runs automatically on scanned pages when Tesseract is installed. `--no-ocr` turns it
 off (pages are marked *Needs OCR*); `process --ocr` fails if no engine is installed.
 
-`process` writes, per PDF, `DOC_xxx.json` and, for known document types,
-`DOC_xxx_standardized.pdf`, plus a batch `index.json` and a combined `review_queue.json`.
+`process` writes, per form, `DOC_xxx.json` and `DOC_xxx.md`, plus `DOC_xxx_standardized.pdf`
+for known document types. It also writes `DOC_xxx_source.pdf` when the form was split out
+of a larger file, converted from an image or turned upright. Finally it writes a batch
+`index.json` and a combined `review_queue.json`.
 
 `ask` questions (also in the web app's **Ask** tab):
 
@@ -87,6 +117,9 @@ off (pages are marked *Needs OCR*); `process --ocr` fails if no engine is instal
 * **Summary:** entities, traced values, relationships, uncertain links, review items,
   missing items, validation errors, share of the page text that was read, and standardized
   fields filled / withheld.
+* **Document:** the whole document in reading order: headings, fields, tables, questions,
+  signatures, paragraphs, and running headers and footers. Click any block to see it on the
+  page. **Markdown** downloads the same as a `.md` file.
 * **Entities:** one card per entity. Each row shows the field, the value, the label exactly as
   printed, the confidence and the status.
 * **Review:** every flagged item with an action: *Confirm value* / *Correct…* for values,
@@ -130,6 +163,14 @@ intake_E_scanned_lindqvist.pdf                72    97.22%    100%       0      
 invoice_northwind.pdf                         38   100.00%    100%       0        0
 lab_report_harper.pdf                         44   100.00%    100%       0        0
 TOTAL                                        541    99.45%    100%       0        3
+```
+
+The stress set (`samples/stress`, `samples/stress/ground_truth`) covers the cases in
+*Guards against silent errors* above:
+
+```
+$ python -m docintel evaluate samples/stress --truth samples/stress/ground_truth
+TOTAL                                        377   100.00%    100%       0        0
 ```
 
 The number that matters most is **silent errors**: a value or link that is wrong, invented
@@ -191,6 +232,8 @@ The document JSON also holds:
 
 * `sections`: the located regions
 * `coverage`: the role of every piece of text
+* `blocks`: the whole document in reading order (also rendered as Markdown)
+* `packet`: for a form split out of a larger file, its pages in that file
 * `review_queue`, `missing` and `validation`
 * `standardized`: fields filled, withheld and where each value was placed
 * after review, `review_log`
@@ -210,6 +253,19 @@ All sample data is synthetic.
 | `invoice_northwind.pdf` | a supplier invoice: outside healthcare entirely |
 | `samples/upload/new_patient_riverside.pdf` | a packet to upload through the web app |
 
+Stress documents (`samples/stress`):
+
+| file | exercises |
+|---|---|
+| `intake_F_tight_labels.pdf` | single-spaced labels, Home/Work Phone, a two-line address, labels before boxes, a row without prescriber |
+| `intake_G_two_packets.pdf` | two different patients' forms in one file |
+| `referral_H_eu_letter.pdf` | narrative letter, day-first dates, an NHS number, a signature block |
+| `screening_I_stacked_two_pages.pdf` | labels above boxes, running header/footer, a table continued on page 2 |
+| `photo_J_sideways.png` | a phone photo, turned 90° |
+| `scan_K_bad_text_layer.pdf` | a scan whose hidden text layer is garbage |
+| `intake_L_encrypted.pdf` | an encrypted PDF |
+| `order_M_fillable_unlabeled.pdf` | fillable fields with no printed labels |
+
 ## Development
 
 ```bash
@@ -224,7 +280,7 @@ docintel/
   layout.py       stage 2: lines, headings -> regions, tables
   bind.py         stage 3: template entities from regions / rows / check boxes
   relate.py       stage 4: typed relationships with evidence
-  generic.py      stage 5: template-free structure for any document
+  generic.py      stage 5: template-free structure, reading-order blocks, Markdown
   validate.py     stage 6: eight checks + review queue
   pipeline.py     runs the stages, assembles the JSON
   review.py       human decisions: confirm / correct / reject, audit log
@@ -235,5 +291,6 @@ docintel/
   store.py        document store and batch files
   server.py       web API;  static/ = single-page UI
   samples.py      sample and reference PDF generators
+  stress.py       stress documents (layouts and conditions that break readers)
   templates/      template (aliases, relationship types), reference form, field map
 ```
