@@ -275,7 +275,11 @@ def generate_stress(out_dir: str | Path = "samples/stress") -> list[Path]:
     make_encrypted(f, enc)
     m = out / "order_M_fillable_unlabeled.pdf"
     make_unlabeled_fillable(m)
-    files += [f, g, h, i, j, k, enc, m]
+    n = out / "intake_N_real_world.pdf"
+    make_real_world(n)
+    o = out / "invoice_O_right_aligned.pdf"
+    make_right_aligned_invoice(o)
+    files += [f, g, h, i, j, k, enc, m, n, o]
     return files
 
 
@@ -300,5 +304,137 @@ def make_unlabeled_fillable(path):
     for name, tip, value, x, top, w in fields:
         c.acroForm.textfield(name=name, tooltip=tip, x=x, y=H - (top + 16), width=w, height=16, value=value,
                              fontName="Helvetica", fontSize=9.5, borderWidth=0.6, forceBorder=True)
+    c.showPage()
+    c.save()
+
+
+# --------------------------------------------------------------------------- N: real-world variety
+def _dingbat(p: _Pen, ch: str, x: float, baseline: float, size: float = 9.5):
+    p.c.setFillColor(HexColor("#000000"))
+    p.c.setFont("ZapfDingbats", size)
+    p.c.drawString(x, H - baseline, ch)
+
+
+def make_real_world(path, inconsistent: bool = False):
+    """The quirks of real intake packets in one form: numbered headings ending in a
+    colon, labels with format hints, choices ticked inside a field, '#'/'No.' labels, a
+    single insurance section, a combined dose/frequency column with a two-line header,
+    NKDA, a pharmacy section, en dashes in a phone number, symbol-font check boxes, and a
+    consent signed by the spouse.  ``inconsistent`` writes facts that contradict each other
+    (insured's birth date, ZIP vs state, two marital statuses ticked) for the consistency tests."""
+    c = canvas.Canvas(str(path), pagesize=letter)
+    c.setTitle("Sunrise Medical Group registration")
+    p = _Pen(c, "flattened", {})
+    NAVY = HexColor("#24345c")
+
+    def head(s, top):
+        p.text(s, X, top + 11, size=11, bold=True, color=NAVY)
+        return top + 24
+
+    p.text("SUNRISE MEDICAL GROUP", X, 56, size=15, bold=True, color=NAVY)
+    p.text("Patient registration - please complete both pages", X, 70, size=8.5, color=GRAY)
+
+    head("1. PATIENT INFORMATION:", 86)
+    p.text("Name (Last, First, MI): Nguyen, David T.", X, 122, size=9.5)
+    p.text("Date of Birth (MM/DD/YYYY): 02/28/1975", X + 280, 122, size=9.5)
+    p.text("Sex:  [ ] F   [X] M", X, 138, size=9.5)
+    p.text(f"Marital Status:  [{'X' if inconsistent else ' '}] Single   [X] Married   [ ] Divorced   [ ] Widowed",
+           X + 140, 138, size=9.5)
+    p.text("Home Address: 88 Lakeshore Drive", X, 154, size=9.5)
+    p.text(f"City: Chicago   State: IL   ZIP: {'90611' if inconsistent else '60611'}", X + 280, 154, size=9.5)
+    p.text("Mobile: 312–555–0147", X, 170, size=9.5)
+    p.text("SSN: 900-12-3456", X + 280, 170, size=9.5)
+    p.text("Preferred Language: Vietnamese", X, 186, size=9.5)
+
+    head("2. INSURANCE INFORMATION:", 204)
+    p.text("Insurance Provider: Prairie Health Plan", X, 240, size=9.5)
+    p.text("Policy No.: PHP-77120-03", X + 280, 240, size=9.5)
+    p.text("Policyholder: Nguyen, David T.", X, 256, size=9.5)
+    p.text("Relationship to Insured: Self", X + 280, 256, size=9.5)
+    p.text(f"Insured's DOB: {'02/28/1957' if inconsistent else '02/28/1975'}", X, 272, size=9.5)
+    p.text("Group No.: G-551", X + 280, 272, size=9.5)
+
+    head("3. EMERGENCY CONTACT:", 290)
+    p.text("Name: Linh Nguyen", X, 326, size=9.5)
+    p.text("Relationship: Wife", X + 200, 326, size=9.5)
+    p.text("Phone: 312-555-0148", X + 360, 326, size=9.5)
+
+    head("4. CURRENT MEDICATIONS:", 344)
+    cols = [X, X + 150, X + 290, X + 410]
+    for x, h in zip(cols, ["Medication", "Dose/Frequency", "Reason", "Prescribing"]):
+        p.text(h, x, 378, size=9, bold=True)
+    p.text("Physician", cols[3], 389, size=9, bold=True)
+    rows = [("Losartan", "50 mg once daily", "Blood pressure", "Dr. Maria Lopez"),
+            ("Metoprolol", "25 mg twice daily", "Heart rate", "Dr. Maria Lopez")]
+    for i, row in enumerate(rows):
+        for x, v in zip(cols, row):
+            p.text(v, x, 406 + i * 16, size=9.5)
+
+    head("5. ALLERGIES:", 440)
+    for x, h in zip([X, X + 200], ["Allergen", "Reaction"]):
+        p.text(h, x, 474, size=9, bold=True)
+    p.text("NKDA", X, 490, size=9.5)
+
+    head("6. MEDICAL HISTORY:", 508)
+    for k, (on, label) in enumerate([(True, "Asthma"), (False, "Diabetes"), (True, "High cholesterol"), (False, "Cancer")]):
+        x = X + k * 120
+        _dingbat(p, "\u25a0" if on else "\u2751", x, 542)  # ZapfDingbats n (filled) / q (empty)
+        p.text(label, x + 14, 542, size=9.5)
+
+    head("7. PREFERRED PHARMACY:", 560)
+    p.text("Pharmacy Name: Walgreens #4471", X, 596, size=9.5)
+    p.text("Pharmacy Phone: (312) 555-0190", X + 280, 596, size=9.5)
+    p.text("Address: 22 Main Street, Chicago", X, 612, size=9.5)
+    c.showPage()
+
+    head("8. CONSENT TO TREAT:", 50)
+    p.text("I consent to examination and treatment by Sunrise Medical Group.", X, 84, size=8.5, color=GRAY)
+    p.text("Signature:", X, 108, size=9.5)
+    p.ink(X + 58, 94, 100, 18, seed=61)
+    p.text("Print Name: Linh Nguyen", X + 230, 108, size=9.5)
+    p.text("Date: 03/02/2026", X + 400, 108, size=9.5)
+    head("9. ACKNOWLEDGEMENT OF PRIVACY PRACTICES:", 128)
+    p.text("Signature: /s/ David Nguyen", X, 166, size=9.5)
+    p.text("Date: 03/02/2026", X + 400, 166, size=9.5)
+    c.showPage()
+    c.save()
+
+
+# --------------------------------------------------------------------------- O: right-aligned invoice
+def make_right_aligned_invoice(path):
+    """Numbers right-aligned under their headers, and a header split over two lines."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    c = canvas.Canvas(str(path), pagesize=letter)
+    c.setTitle("Invoice 5512")
+    p = _Pen(c, "flattened", {})
+    p.text("HARBOR LAB SUPPLY", X, 58, size=15, bold=True, color=TEAL)
+    p.heading("INVOICE", 80, X, RR, color=TEAL, size=11)
+    _kv(p, "Invoice No", "5512", X, 108)
+    _kv(p, "Invoice Date", "09/12/2026", X + 280, 108)
+    p.heading("LINE ITEMS", 128, X, RR, color=TEAL, size=11)
+    right = {"Qty": X + 330, "Unit": X + 420, "Amount": X + 500}
+
+    def rtext(s, xr, baseline, bold=False):
+        w = stringWidth(s, "Helvetica-Bold" if bold else "Helvetica", 9.5)
+        p.text(s, xr - w, baseline, size=9.5, bold=bold)
+
+    p.text("Description", X, 156, size=9.5, bold=True)
+    rtext("Qty", right["Qty"], 156, True)
+    rtext("Unit", right["Unit"], 156, True)
+    rtext("Price", right["Unit"], 167, True)
+    rtext("Amount", right["Amount"], 156, True)
+    items = [("Pipette tips, 1000 uL (case)", "3", "$84.00", "$252.00"),
+             ("Specimen cups, sterile", "12", "$9.50", "$114.00"),
+             ("Centrifuge tubes, 15 mL", "100", "$0.85", "$85.00"),
+             ("Cold packs", "6", "$12.25", "$73.50")]
+    for i, (d, q, u, a) in enumerate(items):
+        y = 186 + i * 17
+        p.text(d, X, y, size=9.5)
+        rtext(q, right["Qty"], y)
+        rtext(u, right["Unit"], y)
+        rtext(a, right["Amount"], y)
+    p.heading("TOTALS", 262, X, RR, color=TEAL, size=11)
+    _kv(p, "Total Due", "$524.50", X + 330, 290)
     c.showPage()
     c.save()

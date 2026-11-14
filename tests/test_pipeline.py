@@ -8,8 +8,8 @@ def test_other_layout_summary(processed):
     assert doc["document"]["status"] == "needs_review"
     assert doc["document"]["extraction_method"] == "layout"
     s = doc["summary"]
-    assert s["uncertain_relationships"] == 3
-    assert s["review_items"] == 7
+    assert s["uncertain_relationships"] == 2
+    assert s["review_items"] == 6
     assert s["missing_items"] == 2
     assert s["validation_errors"] == 0
     assert s["fields_filled"] == 81 and s["fields_withheld"] == 2
@@ -108,24 +108,26 @@ def test_consent_with_both_boxes_is_left_unresolved(processed):
     assert r["support"] == "uncertain"
 
 
-def test_signature_by_someone_else_is_uncertain(processed):
+def test_signature_by_someone_else_links_the_actual_signer(processed):
     doc = processed["C"]
     fin = ent_by(doc, "Agreement", "Financial Responsibility Agreement")
     assert fin["attributes"]["signature"]["extraction_method"] == "layout_signature"
     r = rels(doc, "SIGNS", obj=fin["id"])[0]
-    assert r["support"] == "uncertain" and r["confidence"] == 0.75
-    assert "Ana Lopez" in r["warnings"][0]
+    # the printed name is the emergency contact's (the patient's sister), so she is the signer
+    signer = doc["entities"][r["subject"]]
+    assert signer["type"] == "EmergencyContact" and signer["label"] == "Ana Lopez"
+    assert r["support"] == "explicit" and "sister" in r["basis"]
     cft = ent_by(doc, "Agreement", "Consent for Treatment")
     assert rels(doc, "SIGNS", obj=cft["id"])[0]["support"] == "explicit"
     assert any(m["path"] == "hipaa_acknowledgment.printed_name" for m in doc["missing"])
 
 
-def test_eight_checks_and_review_queue_order(processed):
+def test_nine_checks_and_review_queue_order(processed):
     doc = processed["C"]
-    assert len(doc["validation"]["checks"]) == 8
+    assert len(doc["validation"]["checks"]) == 9
     kinds = [r["kind"] for r in doc["review_queue"]]
-    assert kinds == ["validation", "validation", "attribute", "attribute", "relationship", "relationship", "relationship"]
-    assert [r["review_id"] for r in doc["review_queue"]] == [f"REV_{i:03d}" for i in range(1, 8)]
+    assert kinds == ["validation", "validation", "attribute", "attribute", "relationship", "relationship"]
+    assert [r["review_id"] for r in doc["review_queue"]] == [f"REV_{i:03d}" for i in range(1, 7)]
 
 
 def test_every_relationship_has_allowed_signature_and_evidence(processed):
@@ -162,7 +164,7 @@ def test_flattened_form_detects_ticked_boxes_and_ink(processed):
     assert conds == {"Asthma", "Thyroid disorder"}
     sigs = [e["attributes"]["signature"] for e in doc["entities"].values() if e["type"] == "Agreement"]
     assert len(sigs) == 3 and all(s["extraction_method"] == "layout_signature" for s in sigs)
-    assert doc["summary"]["review_items"] == 1
+    assert doc["summary"]["review_items"] == 0  # the mother signs the financial agreement: linked to her
     assert not any(e["type"] == "Spouse" for e in doc["entities"].values())
 
 

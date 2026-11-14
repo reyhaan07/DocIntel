@@ -95,6 +95,20 @@ def format_phone(text: str) -> str:
     return clean(text)
 
 
+SEX_OTHER = {"x", "u", "o", "other", "unknown", "intersex", "non binary", "nonbinary", "nb", "transgender",
+             "transgender male", "transgender female", "trans male", "trans female", "genderqueer",
+             "prefer not to say", "prefer not to answer", "declined", "decline to answer", "not disclosed",
+             "undisclosed", "unspecified", "not specified", "agender", "two spirit", "gender fluid"}
+MARITAL = {"single", "married", "divorced", "widowed", "widow", "widower", "separated", "legally separated",
+           "partnered", "domestic partner", "domestic partnership", "civil union", "civil partnership",
+           "life partner", "never married", "unmarried", "cohabiting", "common law", "common law marriage",
+           "engaged", "annulled", "other", "unknown", "s", "m", "d", "w", "prefer not to say", "registered partner"}
+
+
+def norm_words(text: str) -> str:
+    return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
+
+
 def normalise(value: str, vtype: str, date_order: str = "mdy"):
     """Return (normalised value, ok).  ``ok`` is False when the text does not fit the type."""
     v = clean(value)
@@ -107,12 +121,21 @@ def normalise(value: str, vtype: str, date_order: str = "mdy"):
         p = format_phone(v)
         return p, len(re.sub(r"\D", "", v)) in (10, 11)
     if vtype == "sex":
-        low = v.lower()
-        if low in ("f", "female", "woman"):
+        low = norm_words(v)
+        if low in ("f", "female", "woman", "fem"):
             return "female", True
         if low in ("m", "male", "man"):
             return "male", True
-        return low, True
+        # other recognised answers are kept as written; anything else is not a sex/gender value
+        return v.lower(), low in SEX_OTHER
+    if vtype == "ssn":
+        d = re.sub(r"\D", "", _digits_fix(v))
+        if len(d) == 9:
+            return f"{d[:3]}-{d[3:5]}-{d[5:]}", True
+        return v, bool(re.fullmatch(r"(?:x{3}|\*{3})[- ]?(?:x{2}|\*{2})[- ]?\d{4}", v, re.I))  # masked: ***-**-1234
+    if vtype == "marital":
+        low = norm_words(v)
+        return v.lower(), low in MARITAL
     if vtype == "lower":
         return v.lower(), True
     if vtype == "state":
@@ -138,11 +161,16 @@ def split_list(text: str) -> list[str]:
     return [clean(p) for p in parts if clean(p)]
 
 
-def split_person_name(full: str) -> tuple[str | None, str | None]:
-    """'Rivera, Maria L.' -> ('Maria', 'Rivera');  'Maria L. Rivera' -> ('Maria', 'Rivera')."""
+def split_person_name(full: str, order: str | None = None) -> tuple[str | None, str | None]:
+    """'Rivera, Maria L.' -> ('Maria', 'Rivera');  'Maria L. Rivera' -> ('Maria', 'Rivera').
+    ``order='last_first'`` (the label printed '(Last, First)') reads 'Rivera Maria L' surname first."""
     full = clean(full)
     if not full:
         return None, None
+    if order == "last_first" and "," not in full:
+        words = [w for w in full.split() if len(w.rstrip(".")) > 1]
+        if len(words) >= 2:
+            return words[1], words[0]
     if "," in full:
         last, rest = full.split(",", 1)
         firsts = [w for w in rest.split() if len(w.rstrip(".")) > 1]
@@ -151,6 +179,22 @@ def split_person_name(full: str) -> tuple[str | None, str | None]:
     if len(words) >= 2:
         return words[0], words[-1]
     return (words[0] if words else None), None
+
+
+def middle_initial(full: str, order: str | None = None) -> str | None:
+    """The middle initial of a printed name ('Rivera, Maria L.' -> 'L', 'John Q. Public' -> 'Q').
+    Only a single letter counts: 'Mary Ann Smith' may be a double first name."""
+    full = clean(full)
+    if not full:
+        return None
+    if "," in full:
+        words = full.split(",", 1)[1].split()[1:]
+    elif order == "last_first":
+        words = full.split()[2:]
+    else:
+        words = full.split()[1:-1]
+    initials = [w.rstrip(".") for w in words if re.fullmatch(r"[A-Za-z]\.?", w)]
+    return initials[0].upper() if len(words) == 1 and len(initials) == 1 else None
 
 
 def name_key(name: str | None) -> str:
@@ -183,6 +227,35 @@ def display_date(iso: str | None) -> str:
 _DIGIT_LIKE = str.maketrans({"o": "0", "O": "0", "l": "1", "I": "1", "|": "1"})
 _UNITS = {"meg": "mcg", "mcq": "mcg", "rng": "mg", "mq": "mg", "rnl": "ml", "lU": "IU", "1U": "IU", "iu": "IU"}
 _DOSE = re.compile(r"^(?P<num>[\dOoIl|.,/]+)\s*(?P<unit>[A-Za-z%]+)?(?P<rest>.*)$")
+
+
+_DOSE_PART = re.compile(
+    r"^\s*(?P<dose>[\dOoIl|.,/]*\d[\dOoIl|.,/]*\s*(?:mg|mcg|g|ml|iu|units?|puffs?|tabs?|tablets?|caps?|capsules?"
+    r"|drops?|%|meq|mmol|meg|mcq|rng|mq)\b(?:\s*/\s*(?:dose|ml|tab|kg|hr|h))?)\s*[,;\-]?\s*(?P<freq>.*)$", re.I)
+
+
+def split_dose_frequency(text: str) -> tuple[str | None, str | None, bool]:
+    """'50 mg once daily' -> ('50 mg', 'once daily', True).  ``ok`` is False when the
+    text does not start with a dose, so the two cannot be told apart."""
+    m = _DOSE_PART.match(text or "")
+    if not m:
+        return clean(text), None, False
+    dose, ok = fix_dosage(m.group("dose"))
+    return dose, clean(m.group("freq")) or None, ok
+
+
+# answers that say a list is empty ("NKDA" in the allergy table, "None" under medications)
+NONE_ANSWERS = {
+    "nkda": "no known drug allergies", "nka": "no known allergies", "nkfa": "no known food allergies",
+    "no known drug allergies": "no known drug allergies", "no known allergies": "no known allergies",
+    "none": "none", "none known": "none", "none reported": "none", "no": "none", "n a": "none", "na": "none",
+    "nil": "none", "denies": "none", "no medications": "none", "no meds": "none", "no surgeries": "none",
+    "no allergies": "no known allergies", "no known": "none", "not applicable": "none",
+}
+
+
+def none_answer(text: str) -> str | None:
+    return NONE_ANSWERS.get(" ".join(re.sub(r"[^a-z]+", " ", (text or "").lower()).split()))
 
 
 def _digits_fix(text: str) -> str:

@@ -379,7 +379,7 @@ def make_riverside(path, title="Riverside New Patient Packet", extras: bool = Fa
     kv("Street Address", "42 Elm Street", X, 136); kv("Marital Status", "Married", X + 300, 136)
     kv("City", "Springfield", X, 152); kv("State", "IL", X + 92, 152); kv("Zip", "62704", X + 142, 152)
     if extras:  # a field the template does not know
-        kv("Preferred Language", "Spanish", X + 300, 152)
+        kv("Referred By", "Dr. Ellen Shaw", X + 300, 152)
     kv("Mobile Phone", "217.555.0143", X, 168); kv("E-mail", "maria.rivera@example.com", X + 300, 168)
 
     head("SPOUSE / PARTNER", 186)
@@ -482,8 +482,8 @@ def make_riverside(path, title="Riverside New Patient Packet", extras: bool = Fa
     kv("Print Name", "Ana Lopez", X + 250, 568)
     kv("Date", "11/03/2026", X + 400, 568)
     if extras:  # a whole section the template does not know
-        head("PREFERRED PHARMACY", 600)
-        kv("Pharmacy Name", "Elm Street Pharmacy", X, 626)
+        head("TRANSPORTATION", 600)
+        kv("Driver Name", "Tom Rivera", X, 626)
         kv("Phone", "217-555-0110", X + 300, 626)
     p.text("Riverside registration packet", RR - 112, 772, size=7.5, color=GRAY)
     c.showPage()

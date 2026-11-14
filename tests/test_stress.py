@@ -150,3 +150,91 @@ def test_stress_suite_has_no_silent_errors():
         if not ocr.available() and d["document"].startswith(("photo_J", "scan_K")):
             continue
         assert d["silent_errors"] == 0, (d["document"], d["details"])
+
+
+# --------------------------------------------------------------------------- N: real-world variety
+@pytest.fixture(scope="module")
+def real():
+    return process_pdf(STRESS / "intake_N_real_world.pdf", ocr=False)
+
+
+def test_choices_ticked_inside_a_field(real):
+    pat = real["entities"]["PAT_001"]["attributes"]
+    assert pat["sex"]["value"] == "male" and pat["sex"]["status"] == "valid"  # "Sex: [ ] F [X] M"
+    assert pat["marital_status"]["value"] == "married"  # "[ ] Single [X] Married [ ] Divorced [ ] Widowed"
+    assert pat["sex"]["extraction_method"] == "layout_checkbox"
+
+
+def test_symbol_font_check_boxes(real):
+    # ZapfDingbats boxes: text extraction reads every glyph the same; the drawn glyph decides
+    conds = {e["label"] for e in real["entities"].values() if e["type"] == "Condition"}
+    assert conds == {"Asthma", "High cholesterol"}
+
+
+def test_format_hints_in_labels(real):
+    pat = real["entities"]["PAT_001"]["attributes"]
+    assert pat["date_of_birth"]["value"] == "1975-02-28"  # "Date of Birth (MM/DD/YYYY):"
+    assert pat["date_of_birth"]["field_label"] == "Date of Birth (MM/DD/YYYY)"
+    # "Name (Last, First, MI): Nguyen, David T."
+    assert (pat["first_name"]["value"], pat["last_name"]["value"], pat["middle_name"]["value"]) == ("David", "Nguyen", "T")
+
+
+def test_real_world_sections_and_fields(real):
+    assert real["document"]["status"] == "completed" and real["summary"]["review_items"] == 0
+    pat = real["entities"]["PAT_001"]["attributes"]
+    assert pat["ssn"]["value"] == "900-12-3456" and pat["preferred_language"]["value"] == "Vietnamese"
+    assert pat["phone"]["value"] == "(312) 555-0147"  # "312–555–0147" with en dashes
+    pol = ent_by(real, "InsurancePolicy", "Prairie Health Plan")["attributes"]  # "2. INSURANCE INFORMATION:"
+    assert pol["member_id"]["value"] == "PHP-77120-03" and pol["group_number"]["value"] == "G-551"
+    assert pol["policy_holder_relationship"]["value"] == "self"
+    pharm = ent_by(real, "Pharmacy", "Walgreens #4471")
+    assert rels(real, "USES_PHARMACY", "PAT_001", pharm["id"])
+
+
+def test_nkda_is_an_answer_not_an_allergy(real):
+    assert not any(e["type"] == "Allergy" for e in real["entities"].values())
+    assert real["entities"]["PAT_001"]["attributes"]["allergies_status"]["value"] == "no known drug allergies"
+
+
+def test_combined_and_unknown_columns_and_two_line_header(real):
+    med = ent_by(real, "Medication", "Losartan")["attributes"]
+    # "Dose/Frequency" is split; "Reason" is kept; "Prescribing / Physician" spans two lines
+    assert (med["dosage"]["value"], med["frequency"]["value"]) == ("50 mg", "once daily")
+    assert med["reason"]["value"] == "Blood pressure"
+    assert med["prescribing_doctor"]["value"] == "Dr. Maria Lopez"
+    assert len([e for e in real["entities"].values() if e["type"] == "Medication"]) == 2
+
+
+def test_consent_signed_by_the_spouse_links_her(real):
+    cft = ent_by(real, "Agreement", "Consent for Treatment")
+    r = rels(real, "SIGNS", obj=cft["id"])[0]
+    assert real["entities"][r["subject"]]["label"] == "Linh Nguyen" and "wife" in r["basis"]
+    hipaa = ent_by(real, "Agreement", "Privacy Practices Acknowledgment")
+    assert rels(real, "SIGNS", obj=hipaa["id"])[0]["subject"] == "PAT_001"  # "/s/ David Nguyen"
+
+
+def test_contradicting_facts_go_to_review(tmp_path):
+    from docintel.stress import make_real_world
+
+    pdf = tmp_path / "bad.pdf"
+    make_real_world(pdf, inconsistent=True)
+    doc = process_pdf(pdf, ocr=False)
+    pat = doc["entities"]["PAT_001"]["attributes"]
+    check = next(c for c in doc["validation"]["checks"] if c["check_id"] == "cross_field_consistency")
+    assert check["status"] == "review"
+    assert pat["zip"]["status"] == "needs_review" and "does not belong to state IL" in pat["zip"]["notes"][-1]
+    pol = ent_by(doc, "InsurancePolicy", "Prairie Health Plan")["attributes"]
+    assert pol["policy_holder_dob"]["status"] == "needs_review"  # 1957 on the card, 1975 for the patient
+    # two marital statuses ticked: kept for review, never chosen silently
+    assert pat["marital_status"]["status"] == "needs_review" and "2 options are ticked" in pat["marital_status"]["notes"][-1]
+
+
+# --------------------------------------------------------------------------- O: right-aligned invoice
+def test_right_aligned_numbers_and_two_line_header():
+    doc = process_pdf(STRESS / "invoice_O_right_aligned.pdf", ocr=False)
+    assert doc["document"]["document_type"] == "invoice" and not doc["document"]["template_applied"]
+    rows = {e["label"]: e["attributes"] for e in doc["entities"].values() if e["type"] == "TableRow"}
+    assert set(rows) == {"Pipette tips, 1000 uL (case)", "Specimen cups, sterile", "Centrifuge tubes, 15 mL", "Cold packs"}
+    pip = rows["Pipette tips, 1000 uL (case)"]
+    assert (pip["qty"]["value"], pip["unit_price"]["value"], pip["amount"]["value"]) == ("3", "$84.00", "$252.00")
+    assert rows["Centrifuge tubes, 15 mL"]["unit_price"]["value"] == "$0.85"

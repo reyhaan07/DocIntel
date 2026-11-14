@@ -87,6 +87,10 @@ class Relater:
             a = self.name_attr(e)
             self.add(P, "HAS_EMERGENCY_CONTACT", e, a.confidence if a else 0.9, self.where(e, "listed "),
                      self.ev(a, "object") + self.heading_ev(e))
+        for ph in self.of_type("Pharmacy"):
+            a = self.name_attr(ph)
+            self.add(P, "USES_PHARMACY", ph, a.confidence if a else 0.9, self.where(ph, "listed "),
+                     self.ev(a, "object") + self.heading_ev(ph))
         for pol in self.of_type("InsurancePolicy"):
             self._insurance(pol)
         for med in self.of_type("Medication"):
@@ -216,6 +220,9 @@ class Relater:
                      self.ev(na, "object") + self.ev(d, "value") + self.heading_ev(person), w, row=person.row)
 
     def _agreement(self, agr: Entity):
+        """Who signed: the person whose name is printed under (or typed as) the signature.
+        The patient by default; a spouse, emergency contact or authorized person named on
+        the form when the printed name is theirs; doubtful when it is nobody's."""
         P = self.patient
         sig = agr.attributes.get("signature")
         if not sig:
@@ -226,17 +233,46 @@ class Relater:
             signer = re.sub(r"^/s/\s*", "", sig.value.strip(), flags=re.I)
         warnings = []
         conf = 0.9
-        if signer and not same_person(signer, P.label) and not same_person(signer, P.attributes.get("full_name").value if "full_name" in P.attributes else ""):
-            conf = 0.75
-            warnings.append(f"printed name '{signer}' differs from patient '{P.label}'; the signer may be a guardian or representative")
-        elif not signer:
+        subject = P
+        how = ""
+        pnames = [P.label] + ([P.attributes["full_name"].value] if "full_name" in P.attributes else [])
+        known_patient = any(n and n != "Patient" for n in pnames)
+        if signer and any(same_person(signer, n) for n in pnames if n and n != "Patient"):
+            how = f"; printed name '{signer}' is the patient's"
+        elif signer:
+            others = [e for t in ("Spouse", "EmergencyContact", "AuthorizedPerson") for e in self.of_type(t)
+                      if same_person(signer, (e.attributes.get("full_name").value if "full_name" in e.attributes else e.label))]
+            ids = {name_key_of(e) for e in others}
+            if others and len(ids) == 1:
+                subject = others[0]
+                rel = others[0].attributes.get("relationship")
+                role = {"Spouse": "spouse", "EmergencyContact": "emergency contact",
+                        "AuthorizedPerson": "authorized person"}[subject.type]
+                how = (f"; printed name '{signer}' is the {role}" + (f" ({rel.value})" if rel and rel.value else "")
+                       + ", not the patient")
+                conf = 0.85
+            else:
+                conf = 0.75
+                if not known_patient:
+                    warnings.append(f"the patient's name was not found, so the printed name '{signer}' cannot be "
+                                    "confirmed as the patient's")
+                else:
+                    warnings.append(f"printed name '{signer}' differs from patient '{P.label}' and matches nobody "
+                                    "else on the form; the signer may be a guardian or representative")
+        else:
             conf = 0.8
         title = agr.attributes.get("title")
         ev = self.ev(sig, "signature") + self.ev(printed, "value") + (
             [Evidence(title.page, title.bbox, title.field_label, "heading")] if title else [])
-        self.add(P, "SIGNS", agr, conf,
-                 f"signature found on the '{sig.field_label}' line of '{agr.label}' (page {sig.page})",
+        self.add(subject, "SIGNS", agr, conf,
+                 f"signature found on the '{sig.field_label}' line of '{agr.label}' (page {sig.page}){how}",
                  ev, warnings, page=sig.page)
+
+
+def name_key_of(e: Entity) -> str:
+    from .normalize import name_key
+    a = e.attributes.get("full_name")
+    return name_key(a.value if a else e.label)
 
 
 def relate(binder: Binder, threshold: float) -> list[Relationship]:

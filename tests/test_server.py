@@ -41,7 +41,7 @@ def test_upload_ask_delete(client, samples_dir):
     data = (samples_dir / "intake_B_flattened_lindqvist.pdf").read_bytes()
     r = client.post("/api/documents", files=[("files", ("lindqvist.pdf", data, "application/pdf"))])
     res = r.json()["documents"][0]
-    assert res["doc_id"] == "DOC_003" and res["status"] == "needs_review"
+    assert res["doc_id"] == "DOC_003" and res["status"] == "completed"
     bad = client.post("/api/documents", files=[("files", ("x.pdf", b"hello", "application/pdf"))]).json()
     assert bad["documents"][0]["error"] == "not a PDF or image file"
 
@@ -53,7 +53,7 @@ def test_upload_ask_delete(client, samples_dir):
     assert err.status_code == 400
 
     queue = client.get("/api/review-queue").json()
-    assert queue["count"] == 8  # 7 for the Riverside packet + 1 for the flattened one
+    assert queue["count"] == 6  # the Riverside packet; the flattened one needs no review
 
     assert client.delete("/api/documents/DOC_003").status_code == 200
     assert [d["doc_id"] for d in client.get("/api/documents").json()["documents"]] == ["DOC_001", "DOC_002"]

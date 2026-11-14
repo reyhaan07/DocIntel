@@ -81,6 +81,11 @@
  },
  "relationships": [
   [
+   "EmergencyContact",
+   "SIGNS",
+   "Agreement[Financial Responsibility Agreement]"
+  ],
+  [
    "FamilyMember[Father]",
    "HAS_CONDITION",
    "Condition[High blood pressure]"
@@ -174,11 +179,6 @@
    "Patient",
    "SIGNS",
    "Agreement[Consent for Treatment]"
-  ],
-  [
-   "Patient",
-   "SIGNS",
-   "Agreement[Financial Responsibility Agreement]"
   ],
   [
    "Patient",

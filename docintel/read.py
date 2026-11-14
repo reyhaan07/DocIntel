@@ -13,6 +13,7 @@ Turns a PDF into positioned tokens per page:
 from __future__ import annotations
 
 import re
+import unicodedata
 from pathlib import Path
 
 from . import ocr as ocr_engine
@@ -27,6 +28,59 @@ _BOX_PREFIX = re.compile(r"^(\[\s*[xX✓✔vV]?\s*\]|☒|☑|☐|□)(.+)$")
 
 def ocr_available() -> bool:
     return ocr_engine.available()
+
+
+# --------------------------------------------------------------------------- text clean-up
+_DASHES = dict.fromkeys(map(ord, "\u2010\u2011\u2012\u2013\u2014\u2015\u2212"), "-")
+
+
+def _clean_text(text: str) -> str:
+    """Unicode compatibility forms (ligatures, full-width letters, non-breaking spaces),
+    and typographic dashes inside numbers ("312–555–0147")."""
+    t = unicodedata.normalize("NFKC", text).replace("\u00ad", "")
+    if any(ch.isdigit() for ch in t):
+        t = t.translate(_DASHES)
+    return t.strip()
+
+
+def _symbol_font(font: str) -> bool:
+    f = font.lower()
+    return any(k in f for k in ("dingbat", "wingding", "webding", "symbol"))
+
+
+def _symbol_boxes(pdf_path: Path, number: int, tokens: list[Token]) -> None:
+    """Check boxes printed with a symbol font (ZapfDingbats, Wingdings).  Text extraction
+    cannot tell their glyphs apart, so the rendered glyph decides: a box-sized mark with
+    ink inside is ticked, an empty outline is not, and small marks (bullets) are words."""
+    from .render import render_page_gray
+
+    scale = 4.0
+    img = render_page_gray(pdf_path, number, scale=scale)
+    px = img.load()
+    W, H = img.size
+    for t in tokens:
+        if t.kind != "symbol":
+            continue
+        size = t.size or (t.bottom - t.top)
+        # some fonts report no advance width for a glyph; look one em wide instead
+        x1 = max(t.x1, t.x0 + 0.9 * size)
+        X0, Y0, X1, Y1 = int(t.x0 * scale), int(t.top * scale), int(x1 * scale) + 1, int(t.bottom * scale) + 1
+        ink = [(x, y) for y in range(max(0, Y0), min(H, Y1)) for x in range(max(0, X0), min(W, X1)) if px[x, y] < 140]
+        t.kind = "word"
+        if not ink:
+            continue
+        xs, ys = [x for x, _ in ink], [y for _, y in ink]
+        w, h = (max(xs) - min(xs) + 1) / scale, (max(ys) - min(ys) + 1) / scale
+        if max(w, h) < 0.5 * size or max(w, h) / max(0.1, min(w, h)) > 1.6:
+            continue  # a bullet or a dash, not a box
+        ix0, iy0 = min(xs) + (max(xs) - min(xs)) * 0.25, min(ys) + (max(ys) - min(ys)) * 0.25
+        ix1, iy1 = max(xs) - (max(xs) - min(xs)) * 0.25, max(ys) - (max(ys) - min(ys)) * 0.25
+        inside = sum(1 for x, y in ink if ix0 <= x <= ix1 and iy0 <= y <= iy1)
+        area = max(1.0, (ix1 - ix0) * (iy1 - iy0))
+        t.checked = inside / area > 0.15
+        t.kind = "checkbox"
+        t.x0, t.x1 = min(xs) / scale, (max(xs) + 1) / scale  # the drawn box, not the font's advance
+        t.text = "[X]" if t.checked else "[ ]"
 
 
 # --------------------------------------------------------------------------- text checkboxes
@@ -254,13 +308,24 @@ def read_pdf(path: str | Path, *, ocr: bool | str = "auto", placeholders: bool =
             number = i + 1
             W, H = float(page.width), float(page.height)
             pd = PageData(number=number, width=W, height=H)
+            try:  # "fake bold" prints every character twice, slightly offset
+                page = page.dedupe_chars(tolerance=1)
+            except Exception:  # pragma: no cover - older pdfplumber
+                pass
             words = page.extract_words(extra_attrs=["fontname", "size"], x_tolerance=1.5, y_tolerance=2,
                                        keep_blank_chars=False, use_text_flow=False)
-            tokens = [
-                Token(w["text"], float(w["x0"]), float(w["top"]), float(w["x1"]), float(w["bottom"]), number,
-                      "text", bold="bold" in str(w.get("fontname", "")).lower(), size=float(w.get("size") or 0))
-                for w in words
-            ]
+            tokens = []
+            for w in words:
+                font = str(w.get("fontname", ""))
+                tok = Token(_clean_text(w["text"]), float(w["x0"]), float(w["top"]), float(w["x1"]),
+                            float(w["bottom"]), number, "text", bold="bold" in font.lower(),
+                            size=float(w.get("size") or 0))
+                if _symbol_font(font) and len(w["text"].strip()) == 1:
+                    tok.kind = "symbol"  # decided below by looking at the glyph
+                if tok.text:
+                    tokens.append(tok)
+            if any(t.kind == "symbol" for t in tokens):
+                _symbol_boxes(path, number, tokens)
             pd.has_text = bool(tokens)
             pd.text_layer = "good" if tokens else "none"
             if tokens and _unreadable(tokens):

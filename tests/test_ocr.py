@@ -112,7 +112,8 @@ def test_scanned_other_clinic_reads_like_the_original(scanned, processed):
     cons = {e["consent_key"]: e["attributes"]["decision"]["value"] for e in doc["entities"].values() if e["type"] == "Consent"}
     assert cons["voicemail"] == "yes" and cons["text_message"] is None
     fin = ent_by(doc, "Agreement", "Financial Responsibility Agreement")
-    assert rels(doc, "SIGNS", obj=fin["id"])[0]["support"] == "uncertain"
+    signs = rels(doc, "SIGNS", obj=fin["id"])[0]
+    assert doc["entities"][signs["subject"]]["type"] == "EmergencyContact" and signs["support"] == "explicit"
     vit = ent_by(doc, "Medication", "Vitamin D3")
     assert vit["attributes"]["frequency"]["status"] == "needs_review"
 

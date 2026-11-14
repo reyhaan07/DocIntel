@@ -14,7 +14,7 @@ from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
 from .models import Line, PageData, Region, Token
-from .template import Template, norm_tokens
+from .template import Template, canon_tokens, norm_tokens, strip_numbering
 
 
 # --------------------------------------------------------------------------- lines
@@ -125,9 +125,11 @@ def _generic_heading(ln: Line, prev: Line | None, style: dict) -> bool:
     toks = ln.tokens
     if any(t.kind != "word" for t in toks) or len(segments(ln)) != 1:
         return False
-    text = " ".join(t.text for t in toks).strip()
+    text = strip_numbering(" ".join(t.text for t in toks).strip())
+    colon = text.endswith(":")
+    text = text.rstrip(" :")
     words = re.findall(r"[A-Za-z][A-Za-z'&/-]*", text)
-    if not words or len(toks) > 6 or text[-1:] in ":?.,;" or not any(len(w) >= 3 for w in words):
+    if not words or len(toks) > 8 or text[-1:] in "?.,;" or not any(len(w) >= 3 for w in words):
         return False
     letters = sum(c.isalpha() for c in text)
     if letters < 0.75 * len(text.replace(" ", "")):
@@ -135,9 +137,12 @@ def _generic_heading(ln: Line, prev: Line | None, style: dict) -> bool:
     caps = all(w.isupper() for w in words if len(w) > 1) and any(len(w) >= 4 for w in words)
     titled = all(w[0].isupper() for w in words if len(w) > 3)
     bold = all(t.bold for t in toks if t.source == "text") and any(t.source == "text" for t in toks)
-    bigger = (style["size"] and min(t.size for t in toks if t.source == "text" or True) >= style["size"] + 1.5) or \
+    sizes = [t.size for t in toks if t.source == "text" and t.size]
+    bigger = bool(style["size"] and sizes and min(sizes) >= style["size"] + 1.5) or \
         (all(t.source == "ocr" for t in toks) and _median([t.height for t in toks]) >= 1.2 * style["height"])
     gap_above = prev is None or prev.page != ln.page or (ln.top - prev.bottom) >= max(9.0, 1.6 * style["gap"])
+    if colon:  # "PATIENT INFORMATION:" alone on its line is a heading only when set apart by style
+        return caps and (bold or bigger)
     if caps and (bold or bigger or gap_above):
         return True
     return titled and (bold or bigger) and gap_above
@@ -155,7 +160,8 @@ def find_headings(lines: list[Line], template: Template, generic: bool = True) -
             if not words or len(words) != len(seg):
                 break
             text = " ".join(t.text for t in words)
-            if text.rstrip().endswith(":") or len(words) > 7:
+            # a heading may end in a colon ("1. PATIENT INFORMATION:") only when it is alone on its line
+            if (text.rstrip().endswith(":") and len(segs) > 1) or len(words) > 8:
                 break
             key = template.match_section(text)
             if not key:
@@ -167,8 +173,9 @@ def find_headings(lines: list[Line], template: Template, generic: bool = True) -
             found.extend(line_heads)
         elif generic and _generic_heading(ln, prev, style):
             text = " ".join(t.text for t in ln.tokens)
-            found.append(Heading("other:" + slug(text), text, list(ln.tokens), ln.page,
-                                 name=" ".join(w.capitalize() if w.isupper() else w for w in text.split()),
+            plain = strip_numbering(text).rstrip(" :")
+            found.append(Heading("other:" + slug(plain), text, list(ln.tokens), ln.page,
+                                 name=" ".join(w.capitalize() if w.isupper() else w for w in plain.split()),
                                  generic=True))
         prev = ln
     return found
@@ -262,7 +269,7 @@ def match_aliases(tokens: list[Token], start: int, table) -> tuple[int, dict] | 
     for t in tokens[start:start + 8]:
         if t.kind != "word":
             break
-        words.append((norm_tokens(t.text), t.source == "ocr"))
+        words.append((canon_tokens(t.text), t.source == "ocr"))
     flat: list[str] = []
     fuzzy: list[bool] = []
     ends: list[int] = []  # flat index -> token count consumed
@@ -405,34 +412,182 @@ class Table:
     rows: list[TableRow]
 
 
+def _overlap(a: Token, x0: float, x1: float) -> float:
+    return min(a.x1, x1) - max(a.x0, x0)
+
+
+def header_second_line(lines: list[Line], li: int) -> Line | None:
+    """The second line of a column header printed over two lines ("Prescribing" over
+    "Physician", "Unit" over "Price"): set tight under the first, words only, no digits,
+    every word under a word of the first line."""
+    if li + 1 >= len(lines):
+        return None
+    ln, nx = lines[li], lines[li + 1]
+    if nx.page != ln.page or any(t.kind != "word" for t in nx.tokens):
+        return None
+    h = _median([t.height for t in ln.tokens], 8.0)
+    if nx.top - ln.bottom > 0.6 * h or len(nx.tokens) > len(ln.tokens):
+        return None
+    if any(re.search(r"\d", t.text) or t.text.endswith(":") for t in nx.tokens):
+        return None
+    for t in nx.tokens:
+        if not any(_overlap(t, u.x0, u.x1) > -2 or abs(t.x0 - u.x0) < 4 or abs(t.x1 - u.x1) < 4 for u in ln.tokens):
+            return None
+    return nx
+
+
+def header_segments(ln: Line, nx: Line | None, gap: float | None = None) -> list[list[Token]]:
+    """Column labels of a header: groups of first-line words, each joined by the
+    second-line words printed under it."""
+    h = _median([t.height for t in ln.tokens], 8.0)
+    segs = segments(ln, gap=gap if gap is not None else max(4.0, 0.6 * h))
+    if nx is None:
+        return segs
+    extra: list[list[Token]] = [[] for _ in segs]
+    for t in sorted(nx.tokens, key=lambda t: t.x0):
+        k = max(range(len(segs)), key=lambda k: (_overlap(t, segs[k][0].x0, segs[k][-1].x1),
+                                                 -abs(t.x0 - segs[k][0].x0)))
+        extra[k].append(t)
+    return [seg + ex for seg, ex in zip(segs, extra)]
+
+
+def merge_header(ln: Line, nx: Line) -> list[Token]:
+    """Header words of two lines in reading order per column."""
+    return [t for seg in header_segments(ln, nx) for t in seg]
+
+
+_JOINERS = re.compile(r"\s*(?:/|&|\+|\band\b)\s*", re.I)
+
+
+def _combined_header(toks: list[Token], i: int, alias_table) -> tuple[int, dict] | None:
+    """One column printed for two fields: "Dose/Frequency", "Dose & Frequency"."""
+    by_alias = {tuple(a): spec for a, spec in alias_table}
+    for n in range(min(4, len(toks) - i), 0, -1):
+        run = toks[i:i + n]
+        if any(t.kind != "word" for t in run) or any(run[k + 1].x0 - run[k].x1 > 6 for k in range(n - 1)):
+            continue
+        text = " ".join(t.text for t in run)
+        parts = [p for p in _JOINERS.split(text) if p.strip()]
+        if len(parts) != 2 or not _JOINERS.search(text):
+            continue
+        specs = [by_alias.get(tuple(canon_tokens(p))) for p in parts]
+        if all(specs) and specs[0]["key"] != specs[1]["key"]:
+            a, b = specs
+            return n, {"key": f"{a['key']}+{b['key']}", "label": text, "type": "combined", "combined": [a, b]}
+    return None
+
+
+def _header_hits(toks: list[Token], alias_table) -> list[tuple[dict, list[Token]]]:
+    hits: list[tuple[dict, list[Token]]] = []
+    taken: set[str] = set()
+    i = 0
+    while i < len(toks):
+        c = _combined_header(toks, i, alias_table)
+        if c and not ({s["key"] for s in c[1]["combined"]} & taken):
+            hits.append((c[1], toks[i:i + c[0]]))
+            taken |= {s["key"] for s in c[1]["combined"]}
+            i += c[0]
+            continue
+        m = match_aliases(toks, i, alias_table)
+        if m and not toks[i + m[0] - 1].text.endswith(":") and m[1]["key"] not in taken:
+            hits.append((m[1], toks[i:i + m[0]]))
+            taken.add(m[1]["key"])
+            i += m[0]
+        else:
+            i += 1
+    return hits
+
+
+def _unknown_columns(toks: list[Token], hits) -> list[tuple[dict, list[Token]]] | None:
+    """Header words that name no known column become columns of their own ("Reason"),
+    provided they look like column labels.  None when they do not (a sentence)."""
+    used = {id(t) for _, ht in hits for t in ht}
+    rest = [t for t in toks if id(t) not in used and t.kind == "word"]
+    if not rest:
+        return []
+    if any(re.search(r"\d", t.text) or t.text.endswith((":", ".", ",")) for t in rest):
+        return None
+    groups: list[list[Token]] = []
+    for t in rest:  # neighbours in reading order that were also neighbours on the line
+        k = toks.index(t)
+        if groups and toks.index(groups[-1][-1]) == k - 1:
+            groups[-1].append(t)
+        else:
+            groups.append([t])
+    if len(groups) > len(hits) or any(len(g) > 3 for g in groups):
+        return None
+    return [({"key": slug(join_tokens(g)).replace("-", "_"), "label": join_tokens(g), "type": "text",
+              "unknown": True}, g) for g in groups]
+
+
+def _well_separated(cols: list[tuple[dict, list[Token]]]) -> bool:
+    """Columns of a header stand apart; the words of a sentence do not."""
+    spans = sorted((min(t.x0 for t in g), max(t.x1 for t in g)) for _, g in cols)
+    h = 8.0
+    return all(spans[k + 1][0] - spans[k][1] >= max(7.0, 0.7 * h) for k in range(len(spans) - 1))
+
+
 def find_table(lines: list[Line], columns_spec: list[dict], region: Region, min_cols: int = 2) -> Table | None:
+    """The section's table: a header naming at least two known columns (one of them the
+    row key), possibly printed over two lines, combining two fields in one column
+    ("Dose/Frequency"), or carrying columns the template does not know ("Reason")."""
     alias_table = Template.alias_table(columns_spec)
     row_key = next((c for c in columns_spec if c.get("row_key")), columns_spec[0])
     for li, ln in enumerate(lines):
-        toks = ln.tokens
-        hits: list[tuple[dict, list[Token]]] = []
-        i = 0
-        while i < len(toks):
-            m = match_aliases(toks, i, alias_table)
-            if m and not toks[i + m[0] - 1].text.endswith(":") and all(m[1]["key"] != h[0]["key"] for h in hits):
-                hits.append((m[1], toks[i:i + m[0]]))
-                i += m[0]
-            else:
-                i += 1
-        if len(hits) < min_cols or not any(h[0]["key"] == row_key["key"] for h in hits):
+        options = [(ln.tokens, li)]
+        nx = header_second_line(lines, li)
+        if nx is not None:
+            options.insert(0, (merge_header(ln, nx), li + 1))
+        best = None
+        for toks, last in options:
+            hits = _header_hits(toks, alias_table)
+            keys = {k["key"] for h in hits for k in (h[0].get("combined") or [h[0]])}
+            if len(hits) < min_cols or row_key["key"] not in keys:
+                continue
+            unknown = _unknown_columns(toks, hits)
+            if unknown is None or (unknown and not _well_separated(hits + unknown)):
+                continue
+            if best is None or len(hits) > len(best[0]) or (len(hits) == len(best[0]) and len(unknown) < len(best[1])):
+                best = (hits, unknown, toks, last)
+        if best is None:
             continue
-        # every header token must belong to a column label (a sentence is not a header)
-        if sum(len(h[1]) for h in hits) < len([t for t in toks if t.kind == "word"]):
-            continue
-        hits.sort(key=lambda h: h[1][0].x0)
+        hits, unknown, toks, last = best
+        if last != li and last - 1 == li and len(_header_hits(ln.tokens, alias_table)) == len(hits) and not (
+                all(t.bold for t in ln.tokens) and all(t.bold for t in lines[last].tokens)):
+            last = li  # the second line added nothing and does not look like header print
+        cols_in = sorted(hits + unknown, key=lambda h: min(t.x0 for t in h[1]))
         cols = []
-        for k, (spec, htoks) in enumerate(hits):
-            x0 = region.x0 if k == 0 else htoks[0].x0 - 6
-            x1 = region.x1 if k == len(hits) - 1 else hits[k + 1][1][0].x0 - 6
+        for k, (spec, htoks) in enumerate(cols_in):
+            x0 = region.x0 if k == 0 else min(t.x0 for t in htoks) - 6
+            x1 = region.x1 if k == len(cols_in) - 1 else min(t.x0 for t in cols_in[k + 1][1]) - 6
             cols.append((spec, x0, x1, htoks))
-        rows = table_rows(lines[li + 1:], cols, row_key["key"], ln.bottom)
-        return Table(ln, cols, rows)
+        header = Line(sorted([t for _, ht in cols_in for t in ht], key=lambda t: (t.top, t.x0))) if last != li else ln
+        rows = table_rows(lines[last + 1:], cols, row_key["key"], lines[last].bottom)
+        return Table(header, cols, rows)
     return None
+
+
+def _column_of(t: Token, cols):
+    """The column a cell word belongs to.  Its left edge decides (OCR boxes may start a
+    few points early, so look a little into the word); a word that misses its column's
+    header entirely but sits under exactly one other header is right-aligned or
+    centred under that one ("$252.00" under "Amount")."""
+    ax = t.x0 + (min(6.0, (t.x1 - t.x0) / 2) if t.source == "ocr" else 0.5)
+    le = None
+    for c in cols:
+        spec, x0, x1, _ = c
+        if x0 <= ax < x1 or (spec is cols[-1][0] and ax >= x0):
+            le = c
+            break
+    def hspan(c):
+        ht = c[3]
+        return (min(u.x0 for u in ht), max(u.x1 for u in ht)) if ht else (c[1], c[2])
+    if le is not None and _overlap(t, *hspan(le)) > 0:
+        return le
+    under = [c for c in cols if _overlap(t, *hspan(c)) > 0]
+    if len(under) == 1:
+        return under[0]
+    return le
 
 
 def table_rows(lines: list[Line], cols, key: str, after: float = -1e9) -> list[TableRow]:
@@ -445,15 +600,11 @@ def table_rows(lines: list[Line], cols, key: str, after: float = -1e9) -> list[T
         cells = {spec["key"]: Cell() for spec, *_ in cols}
         stray = False
         for t in ln2.tokens:
-            # the token's left edge decides its column; OCR boxes may start a few
-            # points early, so look a little into the token (never past its middle)
-            ax = t.x0 + (min(6.0, (t.x1 - t.x0) / 2) if t.source == "ocr" else 0.5)
-            for spec, x0, x1, _ in cols:
-                if x0 <= ax < x1 or (spec is cols[-1][0] and ax >= x0):
-                    cells[spec["key"]].tokens.append(t)
-                    break
-            else:
+            c = _column_of(t, cols)
+            if c is None:
                 stray = True
+            else:
+                cells[c[0]["key"]].tokens.append(t)
         if stray and not any(c.tokens for c in cells.values()):
             continue
         has_key = bool(cells[key].tokens)
@@ -483,10 +634,9 @@ def continue_table(lines: list[Line], table: Table) -> Table | None:
         return None
     filled = set()
     for t in first.tokens:
-        for spec, x0, x1, _ in table.columns:
-            if x0 <= t.x0 + 0.5 < x1 or (spec is table.columns[-1][0] and t.x0 >= x0):
-                filled.add(spec["key"])
-                break
+        c = _column_of(t, table.columns)
+        if c is not None:
+            filled.add(c[0]["key"])
     if len(filled) < 2:
         return None
     key = next((spec["key"] for spec, *_ in table.columns if spec.get("row_key")), table.columns[0][0]["key"])

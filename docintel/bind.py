@@ -12,8 +12,8 @@ from collections import defaultdict
 from .layout import (Cell, Table, bbox_of, build_lines, build_regions, checkbox_options, continuation_tokens,
                      continue_table, find_table, join_tokens, match_aliases, region_lines)
 from .models import Attribute, Entity, Line, PageData, Region, Token
-from .normalize import (clean, infer_date_order, is_ambiguous_date, label_text, name_key, normalise, split_list,
-                        split_person_name)
+from .normalize import (clean, none_answer, split_dose_frequency, infer_date_order, is_ambiguous_date, label_text, name_key, normalise, split_list,
+                        middle_initial, split_person_name)
 from .template import Template, norm, norm_tokens
 
 TYPE_NAMES = {
@@ -21,7 +21,7 @@ TYPE_NAMES = {
     "InsurancePolicy": "Insurance policy", "InsuranceCompany": "Insurance company", "Medication": "Medication",
     "Doctor": "Doctor", "Allergy": "Allergy", "Condition": "Condition", "Surgery": "Surgery", "Hospital": "Hospital",
     "FamilyMember": "Family member", "Consent": "Consent", "AuthorizedPerson": "Authorized person",
-    "Agreement": "Agreement",
+    "Agreement": "Agreement", "Pharmacy": "Pharmacy",
 }
 
 BASE_CONF = {"key_value": 0.92, "table": 0.90, "checkbox": 0.90, "family": 0.85, "signature": 0.90}
@@ -69,15 +69,31 @@ def _parse_kv_line(tokens: list[Token], table) -> list[tuple[dict | None, list[T
     """Split one line into (field spec | None, label tokens, value tokens) triples."""
     labels: list[tuple[int, int, dict | None]] = []
     n = len(tokens)
+
+    def after_box(k: int) -> bool:
+        # words printed right after a check box are that box's option ("[X] Other: ___"), not a label
+        return k > 0 and tokens[k - 1].kind == "checkbox" and tokens[k].x0 - tokens[k - 1].x1 < 20
+
     i = 0
     while i < n:
         t = tokens[i]
+        if t.kind == "word" and after_box(i):
+            i += 1
+            continue
         if t.kind == "word":
             m = match_aliases(tokens, i, table)
             if m and _qualified(tokens, i, labels):
                 m = None  # handled below as a label of its own ("Work Phone:")
             if m:
                 consumed, spec = m
+                j = i + consumed
+                # a format hint printed in brackets after the label: "Date of Birth (MM/DD/YYYY):"
+                if j < n and tokens[j].kind == "word" and tokens[j].text.startswith("(") and tokens[j].x0 - tokens[j - 1].x1 < 8:
+                    k = j
+                    while k < n - 1 and k < j + 6 and ")" not in tokens[k].text and tokens[k + 1].kind == "word":
+                        k += 1
+                    if ")" in tokens[k].text and (tokens[k].text.endswith(":") or (k + 1 < n and tokens[k + 1].text == ":")):
+                        consumed = k + 1 - i
                 last = tokens[i + consumed - 1]
                 nxt = tokens[i + consumed] if i + consumed < n else None
                 colon_tok = nxt is not None and nxt.text == ":"
@@ -97,6 +113,9 @@ def _parse_kv_line(tokens: list[Token], table) -> list[tuple[dict | None, list[T
                 while (start - 1 >= floor and i - start < 4 and tokens[start - 1].kind == "word"
                        and not tokens[start - 1].text.endswith(":") and tokens[start].x0 - tokens[start - 1].x1 < 5):
                     start -= 1
+                if after_box(start):
+                    i += 1
+                    continue
                 # words reaching back to the previous label are the value of that label,
                 # unless a wide empty gap separates them from it (an empty field)
                 if labels and start == floor:
@@ -108,9 +127,74 @@ def _parse_kv_line(tokens: list[Token], table) -> list[tuple[dict | None, list[T
     out = []
     for k, (s, e, spec) in enumerate(labels):
         nxt_start = labels[k + 1][0] if k + 1 < len(labels) else n
-        value = [t for t in tokens[e:nxt_start] if t.kind != "checkbox"]
-        out.append((spec, tokens[s:e], value))
+        out.append((spec, tokens[s:e], list(tokens[e:nxt_start])))  # check boxes stay: they may be the answer
     return out
+
+
+_DATE_HINT = re.compile(r"\b(mm|dd|yyyy|yy)\s*[/.\-]\s*(mm|dd)\s*[/.\-]\s*(yyyy|yy|dd)\b", re.I)
+
+
+def date_hint(label: str) -> str | None:
+    """The date order a label prints for its value: 'Date of Birth (DD/MM/YYYY)' -> 'dmy'."""
+    m = _DATE_HINT.search(label or "")
+    if not m:
+        return None
+    first = m.group(1).lower()
+    return "ymd" if first.startswith("y") else "dmy" if first == "dd" else "mdy"
+
+
+def name_hint(label: str) -> str | None:
+    """'Name (Last, First, MI)' -> 'last_first'; 'Name (First Last)' -> 'first_last'."""
+    m = re.search(r"\(([^)]*)\)", label or "")
+    if not m:
+        return None
+    inner = m.group(1).lower()
+    if re.search(r"\b(last|surname|family)\b.*\b(first|given)\b", inner):
+        return "last_first"
+    if re.search(r"\b(first|given)\b.*\b(last|surname|family)\b", inner):
+        return "first_last"
+    return None
+
+
+def _hint_conflict(raw: str, order: str) -> bool:
+    """A numeric date that cannot be in the order its label prints ('13/05/1975' under MM/DD)."""
+    m = re.fullmatch(r"\s*(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})\s*", raw or "")
+    if not m or order not in ("mdy", "dmy"):
+        return False
+    a, b = int(m.group(1)), int(m.group(2))
+    month = a if order == "mdy" else b
+    return month > 12
+
+
+def choice_value(vtoks: list[Token]):
+    """A field answered by ticking one of its printed options ("Sex: [ ] F [X] M").
+
+    Returns (text, evidence tokens, problems).  ``text`` is None when nothing is ticked.
+    Every doubt is a problem for review: several ticks, a tick without a readable option,
+    or words that belong to no option."""
+    lead, opts, trailing = checkbox_options(vtoks)
+    ticked = [(b, lab) for b, lab in opts if b.checked]
+    problems: list[str] = []
+    names = ", ".join(clean(join_tokens(lab)) or "?" for _, lab in opts)
+    if not ticked:
+        return None, [b for b, _ in opts], [f"none of the options ({names}) is ticked"]
+    if len(ticked) > 1:
+        problems.append(f"{len(ticked)} options are ticked ({', '.join(clean(join_tokens(l)) or '?' for _, l in ticked)})")
+    if any(not lab for _, lab in ticked):
+        problems.append("a ticked box has no readable option next to it")
+    words_after = [t for t in trailing if t.kind == "word"]
+    toks = [x for b, lab in ticked for x in (b, *lab)]
+    text = ", ".join(clean(join_tokens(lab)) for _, lab in ticked if lab)
+    if words_after:
+        if ticked[-1][0] is opts[-1][0]:  # "[X] Other: Buddhist" - the text is the option's answer
+            text = clean(f"{text} {join_tokens(words_after)}")
+            toks += words_after
+        else:
+            problems.append(f"text '{clean(join_tokens(words_after))}' after the options belongs to none of them")
+    stray = [t for t in lead if t.kind == "word"]
+    if stray:
+        problems.append(f"text '{clean(join_tokens(stray))}' before the options belongs to none of them")
+    return text or None, toks, problems
 
 
 class Binder:
@@ -136,6 +220,7 @@ class Binder:
         self.marks = [m for p in pages for m in p.marks]
         self.continued: set[int] = set()  # tokens joined to a value from the following line
         self._unclear_lines: set[int] = set()  # yes/no lines where a box or an answer was not readable
+        self.none_answers: dict[str, Attribute] = {}  # section key -> "NKDA"/"None" written in its table
         # day/month order of numeric dates, decided once for the whole document
         self.date_order = infer_date_order([t.text for p in pages for t in p.tokens if t.kind == "word"])
         self.parse_order = "dmy" if self.date_order == "dmy" else "mdy"
@@ -251,13 +336,15 @@ class Binder:
                 self.slot(f"{spec['key']}.{key}", vtoks, region, label_text(" ".join(t.text for t in ltoks)))
                 found[key] = None  # type: ignore
                 continue
+            if any(t.kind == "checkbox" for t in vtoks):
+                attr = self._choice_attr(fspec, ltoks, vtoks, region, f"{spec['key']}.{key}")
+                if attr:
+                    found[key] = attr
+                continue
             raw = clean(join_tokens(vtoks))
             if not raw:
                 continue
-            value, ok = normalise(raw, fspec.get("type", "text"), self.parse_order)
-            attr = self.make_attr(value, ltoks, vtoks, "key_value", region, raw=raw)
-            _type_notes(attr, raw, value, ok, fspec.get("type", "text"), self.date_order)
-            self._flag_continued(attr, vtoks)
+            attr = self._value_attr(fspec, ltoks, vtoks, region, raw)
             found[key] = attr
         if self.scan:
             return None
@@ -288,7 +375,7 @@ class Binder:
             if company:
                 self._derive_company(ent, company, region0)
         else:
-            nm = found.get("full_name")
+            nm = found.get("full_name") or found.get("name")
             ent.label = nm.value if nm else TYPE_NAMES.get(espec["type"], espec["type"])
         # required fields
         for f in spec["fields"]:
@@ -297,12 +384,46 @@ class Binder:
                                  "no value found in the source document", ent.id, region0)
         return ent
 
+    def _value_attr(self, fspec, ltoks, vtoks, region, raw) -> Attribute:
+        """A typed value; a format printed in the label ('(MM/DD/YYYY)') decides its reading."""
+        vtype = fspec.get("type", "text")
+        label = " ".join(t.text for t in ltoks)
+        hint = date_hint(label) if vtype == "date" else None
+        order = hint if hint in ("mdy", "dmy") else self.parse_order
+        value, ok = normalise(raw, vtype, order)
+        attr = self.make_attr(value, ltoks, vtoks, "key_value", region, raw=raw)
+        _type_notes(attr, raw, value, ok, vtype, hint or self.date_order)
+        if hint and _hint_conflict(raw, hint):
+            attr.notes.append(f"'{raw}' does not follow the format printed in the label ({label_text(label)})")
+            if attr.status == "valid":
+                attr.status = "needs_review"
+        self._flag_continued(attr, vtoks)
+        return attr
+
+    def _choice_attr(self, fspec, ltoks, vtoks, region, path) -> Attribute | None:
+        label = label_text(" ".join(t.text for t in ltoks))
+        text, toks, problems = choice_value(vtoks)
+        if text is None:
+            if not problems or problems[0].startswith("none of"):
+                self.add_missing("not_answered", path, label, problems[0] if problems else "no option ticked",
+                                 None, region)
+            return None
+        vtype = fspec.get("type", "text")
+        value, ok = normalise(text, vtype, self.parse_order)
+        attr = self.make_attr(value, ltoks, toks, "checkbox", region, raw=text, label=label)
+        _type_notes(attr, text, value, ok, vtype, self.date_order)
+        if problems:
+            attr.status = "needs_review"
+            attr.notes.extend(problems)
+        return attr
+
     def _derive_names(self, ent: Entity, region: Region | None):
         full = ent.attributes.get("full_name")
         if full and ("first_name" not in ent.attributes or "last_name" not in ent.attributes):
-            first, last = split_person_name(full.raw or str(full.value))
+            first, last = split_person_name(full.raw or str(full.value), name_hint(full.field_label or ""))
             line_tokens = self._tokens_in_bbox(full.page, full.bbox)
-            for key, part in (("first_name", first), ("last_name", last)):
+            middle = middle_initial(full.raw or str(full.value), name_hint(full.field_label or ""))
+            for key, part in (("first_name", first), ("last_name", last), ("middle_name", middle)):
                 if part and key not in ent.attributes:
                     toks = [t for t in line_tokens if t.text.strip(",.") == part] or line_tokens
                     ent.attributes[key] = Attribute(
@@ -311,7 +432,7 @@ class Binder:
                         confidence=round(min(0.85, full.confidence - 0.07), 2),
                         section=full.section, region_id=full.region_id, raw=full.raw,
                         notes=[f"derived by splitting the printed name '{full.raw}'"],
-                        order=(99, 0, 1 if key == "first_name" else 2))
+                        order=(99, 0, {"first_name": 1, "last_name": 2}.get(key, 3)))
         if not full and "first_name" in ent.attributes and "last_name" in ent.attributes:
             f, l = ent.attributes["first_name"], ent.attributes["last_name"]
             if f.page == l.page:
@@ -374,6 +495,11 @@ class Binder:
                 ent = self._row_entity(spec, espec, region, table, row, rowno)
                 if ent:
                     made.append(ent)
+        none = self.none_answers.get(spec["key"])
+        if none is not None and made:
+            none.status = "needs_review"
+            none.notes.append(f"the table also lists {len(made)} entr{'y' if len(made) == 1 else 'ies'} "
+                              f"({', '.join(e.label for e in made[:3])}); the two contradict each other")
         if not self.scan:
             if espec["type"] == "Medication":
                 self._derive_doctors(made)
@@ -387,12 +513,32 @@ class Binder:
         key_cell = row.cells.get(key_col["key"])
         if not key_cell or not key_cell.text:
             return None
+        others = [c for k, c in row.cells.items() if k != key_col["key"] and c.text]
+        nothing = none_answer(key_cell.text)
+        if nothing and not others and not self.scan:
+            # "NKDA" / "None" written in the table: the list is empty, which is itself an answer
+            akey = f"{spec['key']}_status"
+            if akey not in self.patient.attributes:
+                attr = self.make_attr(nothing, cols[key_col["key"]][1], key_cell.all_tokens, "table", region,
+                                      raw=key_cell.text, label=f"{spec['name']}")
+                attr.notes.append(f"'{key_cell.text}' written in the {spec['name']} table: none reported")
+                self.patient.attributes[akey] = attr
+                self.none_answers[spec["key"]] = attr
+            return None
         ent = self.new_entity(espec["type"], espec["prefix"], key_cell.text, region, espec["group"], row=rowno)
         ent.extra["row_bbox"] = bbox_of([t for ln in row.lines for t in ln.tokens])
         for ckey, (cspec, htoks) in cols.items():
             cell: Cell = row.cells[ckey]
             raw = cell.text
             if not raw:
+                continue
+            if cspec.get("combined"):
+                self._combined_cell(ent, cspec, htoks, cell, region, rowno, raw)
+                continue
+            if cspec.get("unknown"):
+                attr = self.make_attr(raw, htoks, cell.all_tokens, "table", region, raw=raw, row=rowno)
+                attr.notes.append(f"column '{cspec['label']}' is not part of the template; kept as printed")
+                ent.attributes[ckey] = attr
                 continue
             value, ok = normalise(raw, cspec.get("type", "text"), self.parse_order)
             wrapped = ckey in row.wrapped_columns
@@ -411,6 +557,38 @@ class Binder:
             labels = ", ".join(c.get("label", c["key"]) for c in missing_cols)
             self.add_missing("incomplete_record", ent.id, labels, f"record {rowno} has no value for: {labels}", ent.id, region)
         return ent
+
+    def _combined_cell(self, ent: Entity, cspec, htoks, cell: Cell, region, rowno, raw):
+        """One printed column holding two fields ("Dose/Frequency"): split the value."""
+        a, b = cspec["combined"]
+        toks = cell.all_tokens
+        if {a["key"], b["key"]} == {"dosage", "frequency"}:
+            dose, freq, ok = split_dose_frequency(raw)
+            parts = [("dosage", dose), ("frequency", freq)]
+        else:
+            pieces = [x.strip() for x in re.split(r"\s*[/,;]\s*", raw, maxsplit=1)]
+            ok = len(pieces) == 2 and all(pieces)
+            parts = list(zip((a["key"], b["key"]), pieces + [None] * (2 - len(pieces))))
+        used = 0
+        for key, text in parts:
+            if not text:
+                continue
+            n = len(text.split())
+            ptoks = toks[used:used + n] if used + n <= len(toks) else toks
+            used += n
+            spec = a if key == a["key"] else b
+            value, vok = normalise(text, spec.get("type", "text"), self.parse_order)
+            attr = self.make_attr(value, htoks, ptoks, "table", region, raw=text, row=rowno)
+            _type_notes(attr, text, value, vok, spec.get("type", "text"), self.date_order)
+            attr.notes.append(f"split from the combined '{cspec['label']}' column ('{raw}')")
+            if not ok:
+                attr.status = "needs_review"
+                attr.notes.append(f"'{raw}' could not be split into {a.get('label', a['key'])} and "
+                                  f"{b.get('label', b['key'])} with confidence")
+            if cell.continued:
+                attr.status = "needs_review"
+                attr.notes.append(WRAP_NOTE)
+            ent.attributes[key] = attr
 
     def _derive_doctors(self, meds: list[Entity]):
         index: dict[str, Entity] = {}
@@ -714,6 +892,8 @@ class Binder:
             if fspec is None or fspec["key"] in found:
                 continue
             key = fspec["key"]
+            if not self.scan:
+                vtoks = [t for t in vtoks if t.kind != "checkbox"]
             if self.scan:
                 self.slot(f"{spec['key']}.{key}", vtoks, region, label_text(" ".join(t.text for t in ltoks)))
                 found[key] = (None, ltoks)  # type: ignore
@@ -787,8 +967,9 @@ def _type_notes(attr: Attribute, raw: str, value, ok: bool, vtype: str, date_ord
         attr.notes.append(f"read as '{raw}', corrected to '{value}'")
         if ocr and attr.status == "valid":
             attr.status = "needs_review"
-    if not ok and vtype not in ("text", "person_name", "lower", "list"):
-        attr.notes.append(f"value '{raw}' does not look like a {vtype.replace('_', ' ')}")
+    if not ok and vtype not in ("text", "person_name", "lower", "list"):  # marital/sex do say when unknown
+        kind = {"marital": "marital status", "sex": "sex or gender"}.get(vtype, vtype.replace("_", " "))
+        attr.notes.append(f"value '{raw}' does not look like a {kind}")
         if attr.status == "valid":
             attr.status = "needs_review"
     if vtype == "date" and ok and date_order not in ("mdy", "dmy") and is_ambiguous_date(raw):

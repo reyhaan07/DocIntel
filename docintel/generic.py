@@ -16,8 +16,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from .layout import (Cell, Table, TableRow, bbox_of, continuation_tokens, continue_table, find_table, join_tokens,
-                     segments, slug)
+from .layout import (Cell, Table, TableRow, bbox_of, continuation_tokens, continue_table, find_table,
+                     header_second_line, header_segments, join_tokens, segments, slug)
 from .models import Attribute, Entity, Line, Region, Relationship, Evidence, Token
 from .normalize import clean, format_phone, is_ambiguous_date, label_text, parse_date
 from .template import norm
@@ -135,18 +135,20 @@ def _assign(st: Structure, tokens, role: str):
 def _generic_table(lines: list[Line], region: Region, start: int, binder_boxes: dict | None = None):
     """A header row (2+ separated short labels, no colons) with aligned rows below it."""
     ln = lines[start]
-    segs = segments(ln, gap=12)
-    if len(segs) < 2 or any(t.kind != "word" or t.text.endswith(":") for t in ln.tokens):
+    if any(t.kind != "word" or t.text.endswith(":") for t in ln.tokens):
         return None
-    if any(len(s) > 4 for s in segs):
+    second = header_second_line(lines, start)  # "Unit" over "Price"
+    segs = header_segments(ln, second, gap=12)
+    if len(segs) < 2 or any(len(s) > 4 + (1 if second else 0) for s in segs):
         return None
     texts = [join_tokens(s) for s in segs]
     if any(not re.search(r"[A-Za-z]{2,}", tx) for tx in texts):
         return None
-    if start + 1 >= len(lines):
+    first_data = start + (2 if second else 1)
+    if first_data >= len(lines):
         return None
-    nxt = lines[start + 1]
-    starts = [s[0].x0 for s in segs]
+    nxt = lines[first_data]
+    starts = [min(t.x0 for t in s) for s in segs]
     hit_cols = {i for t in nxt.tokens for i, x in enumerate(starts) if x - 8 <= t.x0 < (starts[i + 1] - 6 if i + 1 < len(starts) else 1e9)}
     if len(hit_cols) < 2 or any(t.text.endswith(":") for t in nxt.tokens[:1]):
         return None
@@ -352,14 +354,36 @@ def extract_structure(binder) -> Structure:
             if any(t.kind == "checkbox" for t in toks):
                 from .layout import checkbox_options
 
-                question, opts, trailing = checkbox_options(toks)
-                st.questions.append(GQuestion(region, question, opts))
-                _assign(st, question, "question")
-                for b, lab in opts:
-                    _assign(st, [b], "checkbox")
-                    _assign(st, lab, "option")
-                # "Other: ___" after the boxes is a field of its own
-                toks = [t for t in trailing if id(t) not in st.roles]
+                # several labelled choices on one line ("Sex: [ ] F [X] M   Marital Status: [X] Single")
+                # are one question each; plain labelled fields between them stay fields
+                pairs = _parse_kv_line(toks, [])
+                groups: list[tuple[list[Token], list[Token]]] = []
+                if pairs and any(any(v.kind == "checkbox" for v in vt) for _, _, vt in pairs):
+                    lead = toks[:toks.index(pairs[0][1][0])]
+                    if any(t.kind == "checkbox" for t in lead):
+                        groups.append(([], lead))
+                    rest = [t for t in lead if t.kind != "checkbox"] if not groups else []
+                    for _, ltoks, vtoks in pairs:
+                        if any(v.kind == "checkbox" for v in vtoks):
+                            groups.append((ltoks, vtoks))
+                        else:
+                            rest += ltoks + vtoks
+                else:
+                    groups.append(([], toks))
+                    rest = None
+                trailing_all: list[Token] = []
+                for ltoks, vtoks in groups:
+                    question, opts, trailing = checkbox_options(vtoks)
+                    question = ltoks + question
+                    st.questions.append(GQuestion(region, question, opts))
+                    _assign(st, question, "question")
+                    for b, lab in opts:
+                        _assign(st, [b], "checkbox")
+                        _assign(st, lab, "option")
+                    trailing_all += trailing
+                # "Other: ___" after the boxes, and plain fields beside the choices, are fields of their own
+                toks = [t for t in (rest if rest is not None else []) + trailing_all if id(t) not in st.roles]
+                toks.sort(key=lambda t: t.x0)
                 if not toks:
                     continue
             # labelled fields
@@ -740,3 +764,48 @@ def blocks_to_markdown(doc: dict) -> str:
     while "\n\n\n" in text:
         text = text.replace("\n\n\n", "\n\n")
     return text.strip() + "\n"
+
+
+# --------------------------------------------------------------------------- document type
+# Words that name a kind of document.  Titles and headings count three times as much as
+# body text; the guess is only a label - nothing is extracted differently because of it.
+DOC_KEYWORDS = {
+    "invoice": ["invoice", "bill to", "amount due", "total due", "invoice no", "invoice number", "remit to"],
+    "receipt": ["receipt", "amount paid", "payment received"],
+    "lab report": ["lab report", "laboratory", "test results", "reference range", "specimen", "collected"],
+    "referral": ["referral", "referring physician", "referred to", "reason for referral"],
+    "prescription": ["prescription", "dispense", "refills", "rx number"],
+    "discharge summary": ["discharge summary", "discharge diagnosis", "admission date", "discharge date"],
+    "purchase order": ["purchase order", "po number", "ship to"],
+    "insurance claim": ["claim form", "claim number", "explanation of benefits", "cms 1500"],
+    "screening questionnaire": ["screening", "questionnaire", "over the last 2 weeks", "phq", "gad"],
+    "consent form": ["consent form", "informed consent", "i consent"],
+    "order form": ["order form", "requisition", "order number", "order no"],
+    "letter": ["dear", "sincerely", "yours faithfully", "kind regards"],
+}
+
+
+def guess_document_type(binder) -> tuple[str, str] | None:
+    """(type, basis) from the words on the first page, or None when nothing names it."""
+    from .template import norm
+
+    first = [p for p in binder.pages if p.number == 1]
+    body = " " + norm(" ".join(t.text for p in first for t in p.tokens if t.kind == "word")) + " "
+    heads = " " + norm(" ".join(r.heading for r in binder.regions if r.page == 1 and r.heading)) + " "
+    best, basis = None, []
+    best_score = 0
+    for dtype, words in DOC_KEYWORDS.items():
+        score, found = 0, []
+        for w in words:
+            k = " " + norm(w) + " "
+            if k in heads:
+                score += 3
+                found.append(w)
+            elif k in body:
+                score += 1
+                found.append(w)
+        if score > best_score:
+            best, best_score, basis = dtype, score, found
+    if best is None or best_score < 2:
+        return None
+    return best, "words on page 1: " + ", ".join(f"'{w}'" for w in basis[:4])

@@ -44,7 +44,7 @@ def test_confirm_and_correct_values_refill_the_form(client):
     assert _form(client)["med4_freq"] == "" and doc["summary"]["fields_withheld"] == 2
     freq = _item(doc, "attribute", "MED_004.frequency")
     r = client.post(f"/api/documents/DOC_001/review/{freq['review_id']}", json={"action": "confirm"}).json()
-    assert r["summary"]["review_items"] == 6
+    assert r["summary"]["review_items"] == 5
     decision = _item(doc, "attribute", "CONS_002.decision")
     bad = client.post(f"/api/documents/DOC_001/review/{decision['review_id']}", json={"action": "correct", "value": "maybe"})
     assert bad.status_code == 400
@@ -62,7 +62,7 @@ def test_confirm_and_correct_values_refill_the_form(client):
 def test_reject_link_and_finish_review(client):
     doc = client.get("/api/documents/DOC_001").json()
     assert client.post("/api/documents/DOC_001/ground-truth").status_code == 409  # items still open
-    signs = next(r for r in doc["review_queue"] if r["kind"] == "relationship" and r["predicate"] == "SIGNS")
+    signs = next(r for r in doc["review_queue"] if r["kind"] == "relationship" and r["predicate"] == "PROVIDES_CONSENT")
     assert client.post(f"/api/documents/DOC_001/review/{signs['review_id']}", json={"action": "approve"}).status_code == 400
     client.post(f"/api/documents/DOC_001/review/{signs['review_id']}", json={"action": "reject"})
     doc = client.get("/api/documents/DOC_001").json()
@@ -82,4 +82,4 @@ def test_reject_link_and_finish_review(client):
     r = client.post("/api/documents/DOC_001/ground-truth").json()
     truth = json.loads((client.root / "ground_truth" / r["file"]).read_text())
     assert truth["values"]["Consent[text message].decision"] is None or "Consent[text message].decision" in truth["values"]
-    assert not any(rel[1] == "SIGNS" and "Financial" in rel[2] for rel in truth["relationships"])
+    assert not any(rel[1] == "PROVIDES_CONSENT" and "text message" in rel[2] for rel in truth["relationships"])

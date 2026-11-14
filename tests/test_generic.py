@@ -23,7 +23,8 @@ def _field(doc, label, section=None):
 
 def test_unknown_document_type_is_read_without_a_template(lab):
     d = lab["document"]
-    assert d["document_type"] == "unknown" and d["template_applied"] is False
+    assert d["document_type"] == "lab report" and d["template_applied"] is False  # a guess from its words
+    assert "reference range" in d["document_type_basis"]
     assert d["title"] == "City Lab Services"
     assert d["status"] == "completed"
     assert not any(e["type"] == "Patient" for e in lab["entities"].values())  # no intake meaning is invented
@@ -89,9 +90,9 @@ def test_unknown_parts_of_a_known_form_are_kept_and_reported(tmp_path):
     make_riverside(pdf, extras=True)
     doc = process_pdf(pdf, "DOC_X")
     assert doc["document"]["template_applied"]
-    lang = _field(doc, "Preferred Language")
-    assert lang["attributes"]["value"]["value"] == "Spanish" and lang["section"] == "Patient Information"
-    pharmacy_phone = _field(doc, "Phone", "Preferred Pharmacy")
+    lang = _field(doc, "Referred By")
+    assert lang["attributes"]["value"]["value"] == "Dr. Ellen Shaw" and lang["section"] == "Patient Information"
+    pharmacy_phone = _field(doc, "Phone", "Transportation")
     assert pharmacy_phone["attributes"]["value"]["value"] == "(217) 555-0110"
     # the unknown section closes the agreement above it: nothing leaks into the template entities
     assert doc["entities"]["PAT_001"]["attributes"]["phone"]["value"] == "(217) 555-0143"

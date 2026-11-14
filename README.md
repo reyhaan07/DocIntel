@@ -27,18 +27,24 @@ signatures. Nothing on the page is dropped.
 | **3 Bind** | A value can only join an entity if it was found in the same section and, for tables, on the same row, never because it is merely *near* something. |
 | **4 Relate** | Typed relationships (`TAKES_MEDICATION`, `PRESCRIBED_BY`, `HELD_BY`, `HAS_CONDITION`, `SIGNS`, `CONTAINS`, `DATED` …), each `explicit` or `uncertain`, with the reason it exists (`basis`) and the page locations that support it (`evidence`). |
 | **5 Structure** | Template-free reading of every region: `Label: value` fields, tables (header row + aligned rows), check-box questions, signatures and text. Each piece of text gets exactly one role. On known documents, anything the template did not capture is kept as a generic entity and reported. |
-| **6 Validate** | Eight checks. Anything doubtful goes to the review queue. |
+| **6 Validate** | Nine checks. Anything doubtful goes to the review queue. |
 
 **The checks:** evidence provenance, predicate signatures, medication record integrity,
 insurance policy separation, family history separation, consent decision integrity,
-signature–agreement binding, and **text coverage** (every piece of text is accounted
-for).
+signature–agreement binding, **text coverage** (every piece of text is accounted
+for) and **cross-field consistency** (facts written twice agree: the insured's birth
+date and the holder's, ZIP code and state, a birth date before the signature date, the
+patient not named as their own contact).
 
 **Uncertain, not guessed.** These are kept, marked uncertain and sent for review:
 
 * a medication row whose text wraps onto the next line
 * a question with both *Yes* and *No* ticked, or an answer line where a box or its label could not be read
-* a signature whose printed name is someone else's
+* a signature whose printed name matches nobody on the form (a name that *does* match the
+  spouse, emergency contact or an authorized person links the signature to that person)
+* a field answered by ticking options where none, or more than one, is ticked
+* a `Dose/Frequency` cell that does not start with a dose, so the two cannot be told apart
+* `NKDA` / `None` in a table that also lists entries
 * a value that does not fit its field (a phone number with letters, an impossible date)
 * a date like `03/04/2026` when nothing else on the document settles whether it is day-first
 * a value joined from two lines
@@ -66,6 +72,18 @@ No doctor is invented for a row that has none; the gap is reported as missing.
 | A scan whose hidden text layer is garbage | Detected and read again with OCR |
 | A scan embedded in a digital page | The embedded image is read with OCR as well |
 | Encrypted PDF | Opened when no password is needed; a clear error when one is |
+| `Sex: [ ] F [X] M`, `Marital Status: [ ] Single [X] Married …` | The ticked option is the value. None or two ticked → review, never the text of every option |
+| Check boxes drawn with a symbol font (ZapfDingbats ■ / ❑) | Text extraction reads every glyph alike, so the rendered glyph decides: ink inside the box = ticked |
+| `Date of Birth (MM/DD/YYYY):`, `Name (Last, First, MI):` | The hint is part of the label and sets the date order and the name order; a value that breaks the printed format goes to review |
+| `1. PATIENT INFORMATION:`, `Section B – Insurance` | Numbering and a trailing colon are not part of the heading |
+| `Policy No.`, `Tel`, `Insured's DOB`, `e-mail` | Abbreviations read as the words they stand for |
+| `Dose/Frequency` in one column | Split into dose (`50 mg`) and frequency (`once daily`) |
+| A header printed over two lines (`Prescribing` / `Physician`, `Unit` / `Price`) | Joined into one column label |
+| A table column the template does not know (`Reason`) | Kept on the row as printed, not dropped and not merged into a neighbour |
+| Numbers right-aligned under their header | Assigned by the header they sit under, not by where they start |
+| `NKDA` / `None` in a table | Recorded as an answer (`allergies_status: no known drug allergies`), not as an allergy called "NKDA" |
+| A consent signed by the spouse | `SIGNS` links the person whose name is printed, not the patient |
+| Soft hyphens, ligatures, en dashes in numbers, duplicated (bold-by-overprint) characters | Cleaned before reading |
 
 ## Quick start
 
@@ -162,7 +180,7 @@ intake_D_scanned_rivera.pdf                  105    99.05%    100%       0      
 intake_E_scanned_lindqvist.pdf                72    97.22%    100%       0        2
 invoice_northwind.pdf                         38   100.00%    100%       0        0
 lab_report_harper.pdf                         44   100.00%    100%       0        0
-TOTAL                                        541    99.45%    100%       0        3
+TOTAL                                        543    99.45%    100%       0        3
 ```
 
 The stress set (`samples/stress`, `samples/stress/ground_truth`) covers the cases in
@@ -170,7 +188,7 @@ The stress set (`samples/stress`, `samples/stress/ground_truth`) covers the case
 
 ```
 $ python -m docintel evaluate samples/stress --truth samples/stress/ground_truth
-TOTAL                                        377   100.00%    100%       0        0
+TOTAL                                        449   100.00%    100%       0        0
 ```
 
 The number that matters most is **silent errors**: a value or link that is wrong, invented
@@ -192,7 +210,16 @@ How the suite grows toward 100 %:
 the headings they may be printed under, field labels, table columns, and the
 relationship types allowed between entity types. A document is treated as this type only
 when at least three of its sections are recognised. Anything else is read with the
-template-free structure. Adding a document type means adding a template file, not code.
+template-free structure and gets a document type guessed from the words on its first page
+(`invoice`, `lab report`, `referral` …, with the words that decided it in
+`document_type_basis`). The guess is a label only; nothing is read differently because of it.
+Adding a document type means adding a template file, not code.
+
+Besides the reference form's fields, the template knows the fields real intake packets
+add: middle name, preferred name, SSN, preferred language, race, ethnicity, employer,
+occupation, primary care physician, a second address line, and a **Preferred Pharmacy**
+section (`USES_PHARMACY`). These appear in the JSON; the standardized reference form only
+holds the fields it has boxes for.
 
 The standardized reference form `patient_intake_v1.pdf` has a field map
 (`patient_intake_v1.fieldmap.json`) that places values **by structure**: medication row 3
@@ -265,6 +292,8 @@ Stress documents (`samples/stress`):
 | `scan_K_bad_text_layer.pdf` | a scan whose hidden text layer is garbage |
 | `intake_L_encrypted.pdf` | an encrypted PDF |
 | `order_M_fillable_unlabeled.pdf` | fillable fields with no printed labels |
+| `intake_N_real_world.pdf` | numbered headings with colons, choices ticked inside fields, format hints in labels, one "Insurance Information" section, a `Dose/Frequency` column with a two-line header and a `Reason` column, NKDA, a pharmacy, symbol-font check boxes, a consent signed by the spouse |
+| `invoice_O_right_aligned.pdf` | right-aligned amounts and a two-line `Unit / Price` header |
 
 ## Development
 
@@ -281,7 +310,7 @@ docintel/
   bind.py         stage 3: template entities from regions / rows / check boxes
   relate.py       stage 4: typed relationships with evidence
   generic.py      stage 5: template-free structure, reading-order blocks, Markdown
-  validate.py     stage 6: eight checks + review queue
+  validate.py     stage 6: nine checks + review queue
   pipeline.py     runs the stages, assembles the JSON
   review.py       human decisions: confirm / correct / reject, audit log
   evaluate.py     accuracy against ground truth (silent errors)

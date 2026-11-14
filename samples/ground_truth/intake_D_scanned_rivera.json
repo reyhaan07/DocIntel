@@ -100,6 +100,7 @@
   "Patient.full_name": "Rivera, Maria L.",
   "Patient.last_name": "Rivera",
   "Patient.marital_status": "married",
+  "Patient.middle_name": "L",
   "Patient.phone": "(217) 555-0143",
   "Patient.sex": "female",
   "Patient.state": "IL",
@@ -115,6 +116,11 @@
   "Surgery[Cesarean section].year": "2016"
  },
  "relationships": [
+  [
+   "EmergencyContact",
+   "SIGNS",
+   "Agreement[Financial Responsibility Agreement]"
+  ],
   [
    "FamilyMember[Father]",
    "HAS_CONDITION",
@@ -269,11 +275,6 @@
    "Patient",
    "SIGNS",
    "Agreement[Consent for Treatment]"
-  ],
-  [
-   "Patient",
-   "SIGNS",
-   "Agreement[Financial Responsibility Agreement]"
   ],
   [
    "Patient",

@@ -90,7 +90,11 @@ function renderDoc() {
   b.textContent = STATUS[m.status] || m.status;
   $("#hName").textContent = m.filename;
   $("#hMeta").innerHTML = [
-    m.template_applied === false ? `<span title="No template matched: read with the template-free structure">document type not recognised</span>` : esc(m.document_type || "document"),
+    m.template_applied === false
+      ? (m.document_type && m.document_type !== "unknown"
+          ? `<span title="${esc(m.document_type_basis || "")} · no template: read with the template-free structure">${esc(m.document_type)} (guessed)</span>`
+          : `<span title="No template matched: read with the template-free structure">document type not recognised</span>`)
+      : esc(m.document_type || "document"),
     m.title ? `“${esc(m.title)}”` : "",
     `${m.page_count} page(s)`,
     `extraction: <b>${esc(m.extraction_method)}</b>`,

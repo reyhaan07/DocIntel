@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .bind import TYPE_NAMES, Binder
-from .generic import GENERIC_TYPE_NAMES, build_blocks, build_generic, extract_structure
+from .generic import GENERIC_TYPE_NAMES, build_blocks, build_generic, extract_structure, guess_document_type
 from .ocr import engine_name as ocr_engine_name
 from .ocr import unskew_bbox
 from .read import ocr_available, read_pdf
@@ -301,12 +301,15 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
     for e in ents.values():
         groups.setdefault(e.group, []).append(e.id)
 
+    guess = None if template_used else guess_document_type(binder)
     doc = {
         "schema_version": SCHEMA_VERSION,
         "document": {
             "doc_id": doc_id,
             "filename": filename or path.name,
-            "document_type": template.document_type if template_used else "unknown",
+            "document_type": template.document_type if template_used else (guess[0] if guess else "unknown"),
+            "document_type_basis": (f"template {template.template_id}: {len(matched)} of its sections found"
+                                    if template_used else (guess[1] if guess else None)),
             "title": _title(binder),
             "template": template.template_id if template_used else None,
             "template_applied": template_used,

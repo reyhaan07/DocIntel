@@ -71,9 +71,9 @@ def test_ask_related_section_evidence(processed):
     assert path["related"] and path["hops"] == 2
     sec = ask(doc, "section", "PAT_001.date_of_birth")
     assert sec["heading"] == "PATIENT DEMOGRAPHICS" and sec["printed_label"] == "DOB"
-    signs = next(r for r in doc["relationships"] if r["predicate"] == "SIGNS" and r["support"] == "uncertain")
-    ev = ask(doc, "evidence", signs["relationship_id"])
-    assert ev["pages"] == [2] and ev["warnings"]
+    doubtful = next(r for r in doc["relationships"] if r["predicate"] == "PROVIDES_CONSENT" and r["support"] == "uncertain")
+    ev = ask(doc, "evidence", doubtful["relationship_id"])
+    assert ev["pages"] == [doubtful["page"]] and ev["warnings"]
     with pytest.raises(AskError):
         ask(doc, "owner", "NOPE_001")
     with pytest.raises(AskError):
@@ -104,7 +104,7 @@ def test_cli_process_and_ask(tmp_path, samples_dir, capsys):
     index = json.loads((out / "index.json").read_text())
     assert index["documents"][0]["status"] == "needs_review"
     queue = json.loads((out / "review_queue.json").read_text())
-    assert queue["count"] == 7 and queue["items"][0]["doc_id"] == "DOC_001"
+    assert queue["count"] == 6 and queue["items"][0]["doc_id"] == "DOC_001"
     capsys.readouterr()
     assert main(["ask", str(out / "DOC_001.json"), "owner", "COND_006"]) == 0
     assert json.loads(capsys.readouterr().out)["owner_name"] == "Mother"

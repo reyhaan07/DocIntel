@@ -31,6 +31,39 @@ def norm_tokens(text: str) -> list[str]:
     return norm(text).split()
 
 
+_NUMBERING = re.compile(r"^\s*(?:(?:section|part|step|page)\s+)?(?:\d{1,2}(?:\.\d{1,2})?|[A-Za-z]|[IVXivx]{1,4})[.):\-]\s+")
+
+
+def strip_numbering(text: str) -> str:
+    """'1. PATIENT INFORMATION' / 'Section B: Insurance' / 'IV) Allergies' -> the heading itself."""
+    t = text.strip()
+    m = _NUMBERING.match(t)
+    if m and len(t) > m.end():
+        rest = t[m.end():]
+        # a single letter followed by a real word ("A Patient") is only stripped with punctuation
+        return rest
+    return t
+
+
+# words that mean the same thing in a label ("Policy No." = "Policy Number", "Tel" = "Phone")
+SYNONYMS = {"no": "number", "num": "number", "nbr": "number", "#": "number", "tel": "phone",
+            "telephone": "phone", "ph": "phone", "e": "e", "addr": "address", "dob": "dob"}
+
+
+def canon_tokens(text: str) -> list[str]:
+    toks = norm_tokens(text)
+    out = []
+    i = 0
+    while i < len(toks):
+        if toks[i] == "e" and i + 1 < len(toks) and toks[i + 1] == "mail":  # "e-mail"
+            out.append("email")
+            i += 2
+            continue
+        out.append(SYNONYMS.get(toks[i], toks[i]))
+        i += 1
+    return out
+
+
 class Template:
     def __init__(self, data: dict):
         self.data = data
@@ -60,6 +93,7 @@ class Template:
 
     # ------------------------------------------------------------------ headings
     def match_section(self, text: str, fuzzy: bool = True) -> str | None:
+        text = strip_numbering(text).rstrip(" :")
         t = norm(re.sub(r"\(?\b(?:continued|cont\.)(?=\W|$)\)?", "", text, flags=re.I))
         if not t or len(t) > 60:
             return None
@@ -85,7 +119,7 @@ class Template:
             names = [spec.get("label", ""), *spec.get("aliases", [])]
             seen = set()
             for a in names:
-                toks = norm_tokens(a)
+                toks = canon_tokens(a)
                 if toks and tuple(toks) not in seen:
                     seen.add(tuple(toks))
                     out.append((toks, spec))

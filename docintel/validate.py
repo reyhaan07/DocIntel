@@ -1,6 +1,6 @@
 """Stage 5 - Validate.
 
-Seven independent relationship checks run on every document.  A check either
+Nine independent checks run on every document.  A check either
 passes, asks for review (something doubtful that a person should confirm) or
 fails (a hard inconsistency).  Everything doubtful lands in the review queue.
 """
@@ -29,7 +29,25 @@ CHECKS = [
      "each signature belongs to exactly one agreement"),
     ("text_coverage", "Text coverage",
      "every piece of text on the page is accounted for: a value, a label, a heading or instructions"),
+    ("cross_field_consistency", "Cross-field consistency",
+     "values that describe the same fact agree: the policy holder's birth date, ZIP and state, "
+     "a birth date before every signature date, the patient not listed as their own contact"),
 ]
+
+# first digit of a US ZIP code -> the states (and territories) it is assigned to
+ZIP_STATES = {
+    "0": {"CT", "MA", "ME", "NH", "NJ", "PR", "RI", "VT", "VI", "AE", "NY"},  # 005xx/063xx: NY (Fishers Island)
+    "1": {"DE", "NY", "PA"},
+    "2": {"DC", "MD", "NC", "SC", "VA", "WV"},
+    "3": {"AL", "FL", "GA", "MS", "TN", "AA"},
+    "4": {"IN", "KY", "MI", "OH"},
+    "5": {"IA", "MN", "MT", "ND", "SD", "WI"},
+    "6": {"IL", "KS", "MO", "NE"},
+    "7": {"AR", "LA", "OK", "TX"},
+    "8": {"AZ", "CO", "ID", "NM", "NV", "UT", "WY"},
+    "9": {"AK", "CA", "HI", "OR", "WA", "AP", "GU", "AS", "MP", "PW", "FM", "MH"},
+}
+SELF = {"self", "patient", "same", "same as patient", "insured", "subscriber"}
 GENERIC_ENTITY_TYPES = {"Field", "TableRow", "Question", "Signature"}
 
 
@@ -231,9 +249,96 @@ def validate(binder: Binder, rels: list[Relationship], template: Template, struc
                                               f"{e.type.lower().replace('tablerow', 'table row')}"))
         run("text_coverage", (coverage or {}).get("tokens_total", 0), issues)
 
+    # 9. cross-field consistency ------------------------------------------------
+    issues, checked = _cross_field(ents, rels, issue)
+    run("cross_field_consistency", checked, issues)
+
     errors = [dict(i, check=r["check_id"]) for r in results for i in r["issues"] if i["severity"] == "error"]
     warnings = [dict(i, check=r["check_id"]) for r in results for i in r["issues"] if i["severity"] != "error"]
     return {"checks": results, "errors": errors, "warnings": warnings}
+
+
+def _cross_field(ents: dict, rels: list[Relationship], issue) -> tuple[list[dict], int]:
+    """Facts written twice must agree.  Each value involved in a disagreement goes to
+    review: which of the two is wrong cannot be told from the page alone."""
+    from datetime import date
+
+    from .normalize import same_person
+
+    issues: list[dict] = []
+    checked = 0
+
+    def val(e, k):
+        a = e.attributes.get(k) if e else None
+        return a.value if a is not None and a.value not in (None, "") else None
+
+    def flag(e, k, msg):
+        a = e.attributes.get(k)
+        if a is not None:
+            if a.status == "valid":
+                a.status = "needs_review"
+            if msg not in a.notes:
+                a.notes.append(msg)
+        issues.append(issue(f"{e.id}.{k}", msg))
+
+    pat = next((e for e in ents.values() if e.type == "Patient"), None)
+    people = [e for e in ents.values() if e.type in ("Patient", "Spouse", "EmergencyContact")]
+
+    # the policy holder's birth date is the birth date of the person who holds the policy
+    holders = {r.subject: ents.get(r.object) for r in rels if r.predicate == "HELD_BY"}
+    for pol in [e for e in ents.values() if e.type == "InsurancePolicy"]:
+        hdob = val(pol, "policy_holder_dob")
+        person = holders.get(pol.id)
+        if hdob and person is not None and val(person, "date_of_birth"):
+            checked += 1
+            if hdob != val(person, "date_of_birth"):
+                who = "the patient" if person.type == "Patient" else f"{person.label} ({person.type})"
+                msg = (f"policy holder birth date {hdob} differs from {who}'s birth date "
+                       f"{val(person, 'date_of_birth')}")
+                flag(pol, "policy_holder_dob", msg)
+                flag(person, "date_of_birth", msg)
+        rel = (val(pol, "policy_holder_relationship") or "").lower()
+        hname = val(pol, "policy_holder_name")
+        pname = val(pat, "full_name")
+        if rel and hname and pname and rel not in SELF and same_person(hname, pname):
+            checked += 1
+            flag(pol, "policy_holder_relationship",
+                 f"policy holder '{hname}' is the patient but the relationship is given as '{rel}'")
+
+    # birth dates: not in the future, a plausible age, and before every signature
+    today = date.today().isoformat()
+    signed = sorted(v for e in ents.values() if e.type == "Agreement" for v in [val(e, "date")] if isinstance(v, str))
+    for e in people:
+        dob = val(e, "date_of_birth")
+        if not isinstance(dob, str) or len(dob) != 10:
+            continue
+        checked += 1
+        if dob > today:
+            flag(e, "date_of_birth", f"birth date {dob} is in the future")
+        elif int(today[:4]) - int(dob[:4]) > 120:
+            flag(e, "date_of_birth", f"birth date {dob} gives an age over 120")
+        elif e.type == "Patient" and signed and dob > signed[0]:
+            flag(e, "date_of_birth", f"birth date {dob} is after the form was signed ({signed[0]})")
+
+    # ZIP code and state must belong together (US addresses)
+    for e in ents.values():
+        z, st = val(e, "zip"), val(e, "state")
+        if isinstance(z, str) and isinstance(st, str) and z[:1].isdigit() and len(st) == 2:
+            checked += 1
+            if st.upper() not in ZIP_STATES.get(z[0], set()):
+                msg = f"ZIP code {z} does not belong to state {st.upper()}"
+                flag(e, "zip", msg)
+                flag(e, "state", msg)
+
+    # the patient is not their own emergency contact or spouse
+    pname = val(pat, "full_name")
+    for e in ents.values():
+        if e.type in ("EmergencyContact", "Spouse") and pname and val(e, "full_name"):
+            checked += 1
+            if same_person(val(e, "full_name"), pname):
+                flag(e, "full_name", f"the {e.type == 'Spouse' and 'spouse' or 'emergency contact'} has the "
+                                     f"patient's own name ('{pname}')")
+    return issues, checked
 
 
 def review_queue(binder: Binder, rels: list[Relationship], validation: dict, ocr_pages: list[dict]) -> list[dict]:
