@@ -100,6 +100,8 @@ function renderDoc() {
   ].filter(Boolean).join(" · ") + (m.error ? ` · <span style="color:var(--red)">${esc(m.error)}</span>` : "");
   $("#dlJson").href = `/api/documents/${m.doc_id}/download.json`;
   $("#dlJson").setAttribute("download", `${m.doc_id}.json`);
+  $("#dlMd").href = `/api/documents/${m.doc_id}/download.md`;
+  $("#dlMd").setAttribute("download", `${m.doc_id}.md`);
   $("#dlSrc").href = `/api/documents/${m.doc_id}/source.pdf`;
   $("#dlStd").href = `/api/documents/${m.doc_id}/standardized.pdf`;
   $("#dlStd").hidden = !d.standardized;
@@ -130,6 +132,7 @@ function renderTabs() {
   const vIssues = d.validation.errors.length + d.validation.warnings.length;
   const tabs = [
     ["entities", "Entities", s.entities],
+    ["document", "Document", (d.blocks || []).length],
     ["relationships", "Relationships", s.relationships, s.uncertain_relationships],
     ["review", "Review", null, s.review_items],
     ["missing", "Missing", s.missing_items],
@@ -181,7 +184,7 @@ function whereText(e) {
 /* ------------------------------------------------------------------ tabs */
 function renderTab() {
   const body = $("#tabBody");
-  const fn = { entities: tabEntities, relationships: tabRelationships, review: tabReview, missing: tabMissing, validation: tabValidation, ask: tabAsk }[S.tab];
+  const fn = { entities: tabEntities, document: tabDocument, relationships: tabRelationships, review: tabReview, missing: tabMissing, validation: tabValidation, ask: tabAsk }[S.tab];
   body.innerHTML = fn();
   if (S.tab === "ask") wireAsk();
   markSelection();
@@ -219,6 +222,24 @@ function entityCard(e) {
       ${attrs.length ? `<table class="attrs"><tbody>${rows}</tbody></table>` : `<div class="nothing" style="padding:10px 12px">Nothing could be read for this entity yet.</div>`}
       ${chips}
     </article>`;
+}
+
+function tabDocument() {
+  const blocks = S.doc.blocks || [];
+  if (!blocks.length) return `<div class="nothing">No text was read from this document.</div>`;
+  let page = null, h = "";
+  for (const b of blocks) {
+    if (b.page !== page) { page = b.page; h += `<div class="grouphead">Page ${page}</div>`; }
+    const sel = `data-sel="blk:${b.block_id}"`;
+    if (b.type === "heading") h += `<div class="blk bh" ${sel}>${esc(b.text)}</div>`;
+    else if (b.type === "field") h += `<div class="blk bf" ${sel}><span class="lab">${esc(b.label)}</span><span class="v ${b.value == null ? "none" : ""}">${esc(b.value ?? "(blank)")}</span>${b.normalized ? `<span class="subtle"> → ${esc(b.normalized)}</span>` : ""}</div>`;
+    else if (b.type === "signature") h += `<div class="blk bf" ${sel}><span class="lab">${esc(b.label)}</span><span class="v">${b.signed ? "✍ " + esc(b.value || "signed") : "<span class='none'>not signed</span>"}</span></div>`;
+    else if (b.type === "question") h += `<div class="blk bq" ${sel}>${b.question ? `<span class="lab">${esc(b.question)}</span>` : ""}${b.options.map((o) => `<span class="opt ${o.checked ? "on" : ""}">${o.checked ? "☒" : "☐"} ${esc(o.label || "")}</span>`).join("")}</div>`;
+    else if (b.type === "table") h += `<div class="blk bt" ${sel}><table class="mini"><thead><tr>${b.header.map((c) => `<th>${esc(c)}</th>`).join("")}</tr></thead><tbody>${b.rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>${b.continued ? `<div class="subtle">continued from the previous page</div>` : ""}</div>`;
+    else if (b.type === "text") h += `<div class="blk bx" ${sel}>${esc(b.text).replace(/\n/g, "<br>")}</div>`;
+    else if (b.type === "page_furniture") h += `<div class="blk bp" ${sel}>${esc(b.text)}</div>`;
+  }
+  return h;
 }
 
 function relLine(r) {
@@ -414,7 +435,7 @@ function attrBoxes(eid, key, roleValue = "value") {
 
 function sectionHeading(e) {
   const s = S.doc.sections.find((x) => x.section_id === e.section_id);
-  return s ? [{ page: s.page, bbox: s.heading_bbox, role: "heading" }] : [];
+  return s ? [{ page: s.heading_page || s.page, bbox: s.heading_bbox, role: "heading" }] : [];
 }
 
 function attrTrace(eid, key) {
@@ -469,6 +490,13 @@ function compute(sel) {
     inner.info = `<b>${esc(it.review_id)}</b> · ${esc(it.kind)} · ${linkify(it.reason)}` + (inner.info ? `<br>${inner.info}` : "");
     return inner;
   }
+  if (sel.kind === "blk") {
+    const b = (d.blocks || []).find((x) => x.block_id === sel.id);
+    if (!b) return { boxes: [], refs: [], info: "" };
+    const what = { heading: "heading", field: "field", signature: "signature", question: "check-box question", table: "table", text: "text", page_furniture: "running header / footer" }[b.type] || b.type;
+    return { boxes: [{ page: b.page, bbox: b.bbox, role: b.type === "heading" || b.type === "page_furniture" ? "heading" : "value" }], refs: [],
+      info: `<b>${esc(b.block_id)}</b> · ${esc(what)} · page ${b.page}${b.section ? ` · section ${esc(b.section)}` : ""}` };
+  }
   if (sel.kind === "miss") {
     const it = d.missing[sel.idx];
     let boxes = [];
@@ -485,7 +513,7 @@ function compute(sel) {
 
 function selKey(sel) {
   if (!sel) return "";
-  return { attr: `attr:${sel.eid}:${sel.key}`, ent: `ent:${sel.eid}`, rel: `rel:${sel.id}`, rev: `rev:${sel.id}`, miss: `miss:${sel.idx}` }[sel.kind];
+  return { attr: `attr:${sel.eid}:${sel.key}`, ent: `ent:${sel.eid}`, rel: `rel:${sel.id}`, rev: `rev:${sel.id}`, miss: `miss:${sel.idx}`, blk: `blk:${sel.id}` }[sel.kind];
 }
 
 function parseSel(key) {
@@ -623,8 +651,8 @@ function renderViewer(scrollTo = false) {
 
 /* ------------------------------------------------------------------ upload */
 async function uploadFiles(fileList) {
-  const files = [...fileList].filter((f) => /\.pdf$/i.test(f.name) || f.type === "application/pdf");
-  if (!files.length) { toast("Only PDF files can be processed.", true); return; }
+  const files = [...fileList].filter((f) => /\.(pdf|png|jpe?g|tiff?)$/i.test(f.name) || f.type === "application/pdf" || f.type.startsWith("image/"));
+  if (!files.length) { toast("Only PDF and image files (PNG, JPG, TIFF) can be processed.", true); return; }
   const dz = $("#dropzone");
   let last = null;
   for (const f of files) {
@@ -637,14 +665,15 @@ async function uploadFiles(fileList) {
       for (const r of res.documents) {
         if (!r.doc_id) { toast(`${esc(r.filename)}: ${esc(r.error)}`, true); continue; }
         last = r.doc_id;
-        toast(`<b>${esc(r.doc_id)}</b> ${esc(r.filename)} — ${esc(STATUS[r.status] || r.status)}`, r.status === "failed");
+        const split = r.packet ? ` · <b>separate form ${r.packet.index} of ${r.packet.count}</b>` : "";
+        toast(`<b>${esc(r.doc_id)}</b> ${esc(r.filename)} — ${esc(STATUS[r.status] || r.status)}${split}`, r.status === "failed");
       }
     } catch (e) {
       toast(`${esc(f.name)}: ${esc(e.message)}`, true);
     }
   }
   dz.classList.remove("busy");
-  dz.innerHTML = `<strong>Drop PDFs here</strong><span>or click to choose · each file is processed on its own</span>`;
+  dz.innerHTML = `<strong>Drop PDFs or scans here</strong><span>or click to choose · PDF, PNG, JPG, TIFF · each file is processed on its own</span>`;
   if (last) { S.tab = "entities"; await loadDocs(last); }
 }
 

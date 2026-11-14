@@ -16,6 +16,21 @@ from .read import ocr_available
 from .store import Store
 
 STATIC = Path(__file__).parent / "static"
+
+
+def _supported(data: bytes) -> bool:
+    """PDF, or an image Pillow can open (PNG, JPEG, TIFF, BMP, GIF, WebP)."""
+    if data.lstrip()[:5].startswith(b"%PDF"):
+        return True
+    import io
+
+    from PIL import Image
+
+    try:
+        Image.open(io.BytesIO(data)).verify()
+        return True
+    except Exception:
+        return False
 MAX_UPLOAD = 25 * 1024 * 1024
 
 
@@ -51,15 +66,17 @@ def create_app(data_dir: str | Path = "docintel_data", seed: str | Path | None =
             if len(data) > MAX_UPLOAD:
                 results.append({"filename": name, "error": "file is larger than 25 MB"})
                 continue
-            if not data.startswith(b"%PDF"):
-                results.append({"filename": name, "error": "not a PDF file"})
+            if not _supported(data):
+                results.append({"filename": name, "error": "not a PDF or image file"})
                 continue
             from starlette.concurrency import run_in_threadpool
 
-            doc = await run_in_threadpool(store.add, data, name, ocr=use_ocr)
-            d = doc["document"]
-            results.append({"doc_id": d["doc_id"], "filename": d["filename"], "status": d["status"],
-                            "error": d.get("error"), "summary": doc["summary"]})
+            docs = await run_in_threadpool(store.add, data, name, ocr=use_ocr)
+            for doc in docs:
+                d = doc["document"]
+                results.append({"doc_id": d["doc_id"], "filename": d["filename"], "status": d["status"],
+                                "error": d.get("error"), "summary": doc["summary"],
+                                "packet": d.get("packet")})
         return JSONResponse({"documents": results})
 
     def get_document(request: Request):
@@ -85,6 +102,14 @@ def create_app(data_dir: str | Path = "docintel_data", seed: str | Path | None =
         doc_id = request.path_params["doc_id"]
         _doc(doc_id)
         return FileResponse(store.json_path(doc_id), media_type="application/json", filename=f"{doc_id}.json")
+
+    def download_md(request: Request):
+        from .generic import blocks_to_markdown
+
+        doc = _doc(request.path_params["doc_id"])
+        name = f"{doc['document']['doc_id']}.md"
+        return Response(blocks_to_markdown(doc), media_type="text/markdown; charset=utf-8",
+                        headers={"Content-Disposition": f'attachment; filename="{name}"'})
 
     def source_pdf(request: Request):
         doc = _doc(request.path_params["doc_id"])
@@ -170,6 +195,7 @@ def create_app(data_dir: str | Path = "docintel_data", seed: str | Path | None =
         Route("/api/documents/{doc_id}", delete_document, methods=["DELETE"]),
         Route("/api/documents/{doc_id}/reprocess", reprocess, methods=["POST"]),
         Route("/api/documents/{doc_id}/download.json", download_json),
+        Route("/api/documents/{doc_id}/download.md", download_md),
         Route("/api/documents/{doc_id}/source.pdf", source_pdf),
         Route("/api/documents/{doc_id}/standardized.pdf", standardized_pdf),
         Route("/api/documents/{doc_id}/pages/{kind}/{page:int}.png", page_png),

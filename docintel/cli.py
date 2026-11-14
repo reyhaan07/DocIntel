@@ -49,8 +49,11 @@ def _cmd_process(args) -> int:
     from .pipeline import process_pdf
     from .store import write_batch_files
 
+    from .generic import blocks_to_markdown
+    from .pipeline import IMAGE_TYPES, process_file
+
     src = Path(args.input)
-    files = sorted(src.glob("*.pdf")) if src.is_dir() else [src]
+    files = sorted(f for f in src.iterdir() if f.suffix.lower() in {".pdf", *IMAGE_TYPES}) if src.is_dir() else [src]
     if not files:
         print(f"no PDF files found in {src}", file=sys.stderr)
         return 1
@@ -60,14 +63,28 @@ def _cmd_process(args) -> int:
         _ocr_banner()
     docs = []
     print(f"{'doc':8} {'status':13} {'entities':>8} {'rels':>5} {'review':>6} {'missing':>7}  file")
-    for i, f in enumerate(files, start=1):
-        doc_id = f"DOC_{i:03d}"
-        doc = process_pdf(f, doc_id, ocr=_ocr_mode(args), standardized_path=out / f"{doc_id}_standardized.pdf")
-        (out / f"{doc_id}.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
-        docs.append(doc)
-        s = doc["summary"]
-        print(f"{doc_id:8} {doc['document']['status']:13} {s['entities']:>8} {s['relationships']:>5} "
-              f"{s['review_items']:>6} {s['missing_items']:>7}  {f.name}")
+    counter = [0]
+
+    def target(k, n, pages):
+        counter[0] += 1
+        doc_id = f"DOC_{counter[0]:03d}"
+        return {"doc_id": doc_id, "source_path": out / f"{doc_id}_source.pdf",
+                "standardized_path": out / f"{doc_id}_standardized.pdf"}
+
+    for f in files:
+        try:
+            batch = process_file(f, target, ocr=_ocr_mode(args))
+        except Exception as exc:
+            print(f"{'-':8} {'failed':13} {'':>8} {'':>5} {'':>6} {'':>7}  {f.name}: {exc}")
+            continue
+        for doc in batch:
+            doc_id = doc["document"]["doc_id"]
+            (out / f"{doc_id}.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
+            (out / f"{doc_id}.md").write_text(blocks_to_markdown(doc), encoding="utf-8")
+            docs.append(doc)
+            s = doc["summary"]
+            print(f"{doc_id:8} {doc['document']['status']:13} {s['entities']:>8} {s['relationships']:>5} "
+                  f"{s['review_items']:>6} {s['missing_items']:>7}  {doc['document']['filename']}")
     write_batch_files(out, docs)
     print(f"\nwrote {len(docs)} JSON files, {len(docs)} standardized PDFs, index.json and review_queue.json to {out}/")
     return 0

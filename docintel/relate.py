@@ -47,7 +47,7 @@ class Relater:
 
     def heading_ev(self, ent: Entity) -> list[Evidence]:
         r = self.region(ent)
-        return [Evidence(r.page, r.heading_bbox, r.heading, "heading")] if r else []
+        return [Evidence(r.hpage, r.heading_bbox, r.heading, "heading")] if r else []
 
     def name_attr(self, ent: Entity) -> Attribute | None:
         for k in ("full_name", "name", "allergen", "procedure", "insurance_company", "relation", "topic", "title"):

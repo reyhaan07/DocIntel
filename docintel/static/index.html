@@ -15,14 +15,14 @@
       <span class="tagline">relationship-aware document extraction</span>
     </div>
     <button class="btn primary" id="uploadBtn" type="button">Upload PDFs</button>
-    <input type="file" id="fileInput" accept="application/pdf,.pdf" multiple hidden>
+    <input type="file" id="fileInput" accept="application/pdf,.pdf,image/png,image/jpeg,image/tiff,.png,.jpg,.jpeg,.tif,.tiff" multiple hidden>
   </header>
 
   <div class="app">
     <aside class="sidebar">
       <div class="dropzone" id="dropzone" role="button" tabindex="0">
-        <strong>Drop PDFs here</strong>
-        <span>or click to choose · each file is processed on its own</span>
+        <strong>Drop PDFs or scans here</strong>
+        <span>or click to choose · PDF, PNG, JPG, TIFF · each file is processed on its own</span>
       </div>
       <div class="sidehead"><span>Documents</span><span id="docCount">0</span></div>
       <nav class="doclist" id="docList" aria-label="Documents"></nav>
@@ -44,6 +44,7 @@
             <button class="btn" id="ocrBtn" type="button" hidden>Run OCR</button>
             <button class="btn" id="truthBtn" type="button" hidden>Save as ground truth</button>
             <a class="btn" id="dlJson" href="#">Download JSON</a>
+            <a class="btn" id="dlMd" href="#">Markdown</a>
             <a class="btn" id="dlStd" href="#" target="_blank" rel="noopener">Standardized PDF</a>
             <a class="btn" id="dlSrc" href="#" target="_blank" rel="noopener">Source PDF</a>
             <button class="btn danger" id="delBtn" type="button">Delete</button>

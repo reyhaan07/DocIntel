@@ -199,6 +199,25 @@ def validate(binder: Binder, rels: list[Relationship], template: Template, struc
         stray = unexplained_tokens(binder, structure)
         for t in stray[:20]:
             issues.append(issue(f"page {t.page}", f"text '{t.text}' could not be placed in any structure"))
+        # text sitting *between* data in a section is probably data that lost its label
+        # (a second address line, a value written outside its box) - never accept it silently
+        tops: dict[str, list[float]] = defaultdict(list)
+        for f in structure.fields:
+            tops[f.region.region_id].append(min(t.top for t in (f.label_tokens or f.value_tokens)))
+        for gt in structure.tables:
+            tops[gt.region.region_id].append(gt.table.header.top)
+        for q in structure.questions:
+            toks = q.question_tokens or [b for b, _ in q.options]
+            tops[q.region.region_id].append(min(t.top for t in toks))
+        for region, words in structure.text:
+            top = min(t.top for t in words)
+            above = [y for y in tops.get(region.region_id, []) if y < top - 2]
+            short = len(words) <= 6
+            known = not region.key.startswith("other:")
+            if above and (short or (template_used and known)):
+                text = " ".join(t.text for t in words)
+                issues.append(issue(f"page {region.page}", f"text '{text[:60]}' in section '{region.name}' is not "
+                                                          f"attached to any field"))
         if template_used:
             by_section: dict[str, list[Entity]] = defaultdict(list)
             for e in ents.values():

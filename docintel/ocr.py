@@ -60,6 +60,7 @@ class OcrPage:
     width: float
     height: float
     notes: list[str] = field(default_factory=list)
+    rotation: int = 0  # quarter turns (clockwise degrees) applied before reading: 0/90/180/270
 
 
 # --------------------------------------------------------------------------- deskew
@@ -368,14 +369,35 @@ def _merge_passes(passes: list[list[Token]]) -> list[Token]:
     return out
 
 
-def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float) -> OcrPage:
+def detect_rotation(img) -> int:
+    """Clockwise quarter turn that puts the text upright (0, 90, 180 or 270), from
+    Tesseract's orientation detection when its data is installed."""
+    import pytesseract
+
+    small = img.copy()
+    small.thumbnail((1400, 1400))
+    try:
+        osd = pytesseract.image_to_osd(small, config="--psm 0", output_type=pytesseract.Output.DICT)
+    except Exception:  # no osd data, or too little text to decide
+        return 0
+    rot = int(osd.get("rotate", 0)) % 360
+    return rot if rot in (90, 180, 270) and float(osd.get("orientation_conf", 0)) >= 2.0 else 0
+
+
+def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float, *, deskew: bool = True,
+             orient: bool = True) -> OcrPage:
     import numpy as np
     from PIL import Image
 
     from .render import render_page_gray
 
     img = render_page_gray(pdf_path, page_number, scale=SCALE)
-    angle = estimate_skew(img)
+    rotation = detect_rotation(img) if orient else 0
+    if rotation:
+        img = img.rotate(-rotation, expand=True, fillcolor=255)
+        if rotation in (90, 270):
+            width, height = height, width
+    angle = estimate_skew(img) if deskew else 0.0
     if angle:
         img = img.rotate(angle, resample=Image.BICUBIC, fillcolor=255)
     page_arr = np.asarray(img)
@@ -393,6 +415,8 @@ def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float
     tokens = [t for t in tokens if id(t) not in drop_ids] + boxes
     marks = find_ink(clean, tokens, page_number)
     notes = [f"page straightened by {angle:+.2f} degrees before OCR"] if angle else []
+    if rotation:
+        notes.insert(0, f"page turned {rotation} degrees clockwise to read it upright")
     if line_px:
         notes.append("ruled lines and box borders removed before OCR")
-    return OcrPage(tokens, marks, angle, width, height, notes)
+    return OcrPage(tokens, marks, angle, width, height, notes, rotation)

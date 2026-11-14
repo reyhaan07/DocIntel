@@ -1,0 +1,70 @@
+{
+ "document": "referral_H_eu_letter.pdf",
+ "document_type": "unknown",
+ "values": {
+  "Field[Date of Birth].value": "1980-04-05",
+  "Field[Date].value": "2026-03-14",
+  "Field[NHS Number].value": "943 476 5919",
+  "Field[Name].value": "Dr. Samuel Price",
+  "Field[Patient].value": "Anna Kowalski",
+  "Field[Referred To].value": "Dr. Helen Ward, Cardiology",
+  "Section[Current Medications].title": "Current Medications",
+  "Section[Northgate Medical Centre].title": "Northgate Medical Centre",
+  "Section[Referral].title": "Referral",
+  "Section[Signed].title": "Signed",
+  "Signature[Referring GP].signature": "ink signature",
+  "TableRow[Bisoprolol].dose": "2.5 mg",
+  "TableRow[Bisoprolol].instructions": "Once each morning",
+  "TableRow[Bisoprolol].medicine": "Bisoprolol",
+  "TableRow[Cetirizine].dose": "10 mg",
+  "TableRow[Cetirizine].instructions": "When needed",
+  "TableRow[Cetirizine].medicine": "Cetirizine"
+ },
+ "relationships": [
+  [
+   "Section[Current Medications]",
+   "CONTAINS",
+   "TableRow[Bisoprolol]"
+  ],
+  [
+   "Section[Current Medications]",
+   "CONTAINS",
+   "TableRow[Cetirizine]"
+  ],
+  [
+   "Section[Northgate Medical Centre]",
+   "CONTAINS",
+   "Field[Date]"
+  ],
+  [
+   "Section[Referral]",
+   "CONTAINS",
+   "Field[Date of Birth]"
+  ],
+  [
+   "Section[Referral]",
+   "CONTAINS",
+   "Field[NHS Number]"
+  ],
+  [
+   "Section[Referral]",
+   "CONTAINS",
+   "Field[Patient]"
+  ],
+  [
+   "Section[Referral]",
+   "CONTAINS",
+   "Field[Referred To]"
+  ],
+  [
+   "Section[Signed]",
+   "CONTAINS",
+   "Field[Name]"
+  ],
+  [
+   "Section[Signed]",
+   "CONTAINS",
+   "Signature[Referring GP]"
+  ]
+ ]
+}

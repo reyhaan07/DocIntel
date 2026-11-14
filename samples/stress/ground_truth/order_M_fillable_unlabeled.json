@@ -1,0 +1,33 @@
+{
+ "document": "order_M_fillable_unlabeled.pdf",
+ "document_type": "unknown",
+ "values": {
+  "Field[Account number].value": "RFC-00912",
+  "Field[Contact phone].value": "(217) 555-0100",
+  "Field[Customer name].value": "Riverside Family Clinic",
+  "Field[Deliver by date].value": "2026-12-01",
+  "Section[Order].title": "Order"
+ },
+ "relationships": [
+  [
+   "Section[Order]",
+   "CONTAINS",
+   "Field[Account number]"
+  ],
+  [
+   "Section[Order]",
+   "CONTAINS",
+   "Field[Contact phone]"
+  ],
+  [
+   "Section[Order]",
+   "CONTAINS",
+   "Field[Customer name]"
+  ],
+  [
+   "Section[Order]",
+   "CONTAINS",
+   "Field[Deliver by date]"
+  ]
+ ]
+}

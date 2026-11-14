@@ -20,9 +20,9 @@ from .models import Mark, PageData, Token
 
 CHECK_ON = {"[x]", "[✓]", "[✔]", "[v]", "☒", "☑", "✓", "✔", "■"}
 CHECK_OFF = {"[ ]", "[]", "☐", "□"}
+_BOX_SUFFIX = re.compile(r"^(.*?[A-Za-z?:.])(\[\s*[xX✓✔vV]?\s*\]|☒|☑|☐|□)$")
 _BOX_PREFIX = re.compile(r"^(\[\s*[xX✓✔vV]?\s*\]|☒|☑|☐|□)(.+)$")
 
-FOOTER_MARGIN = 36.0
 
 
 def ocr_available() -> bool:
@@ -40,9 +40,17 @@ def _checkbox_state(text: str) -> bool | None:
 
 
 def _normalise_checkbox_tokens(tokens: list[Token]) -> list[Token]:
-    # split "[X]Yes" style tokens
+    # split "[X]Yes" and "No[]" style tokens (OCR often glues a box to its label)
     split: list[Token] = []
     for t in tokens:
+        ms = _BOX_SUFFIX.match(t.text) if t.kind == "word" else None
+        if ms:
+            word, box = ms.group(1), ms.group(2)
+            frac = len(word) / max(1, len(t.text))
+            xm = t.x0 + (t.x1 - t.x0) * frac
+            split.append(Token(word, t.x0, t.top, xm - 1, t.bottom, t.page, t.source, conf=t.conf, size=t.size))
+            split.append(Token(box, xm, t.top, t.x1, t.bottom, t.page, t.source, conf=t.conf, size=t.size))
+            continue
         m = _BOX_PREFIX.match(t.text)
         if m and t.kind == "word":
             box, rest = m.group(1), m.group(2)
@@ -197,10 +205,27 @@ def _form_tokens(reader, page_index: int, number: int, placeholders: bool) -> li
             if isinstance(v, list):
                 text = ", ".join(str(x) for x in v)
             if text:
-                out.append(Token(text, x0, top, x1, bottom, number, "form_field", field_name=name, conf=0.98))
+                tip = _inherited(a, "/TU")
+                out.append(Token(text, x0, top, x1, bottom, number, "form_field", field_name=name, conf=0.98,
+                                 hint=str(tip).strip() if tip else None))
             elif placeholders:
                 out.append(Token("", x0, top, x1, bottom, number, "form_field", kind="placeholder", field_name=name))
     return out
+
+
+# --------------------------------------------------------------------------- text-layer quality
+_WORDLIKE = re.compile(r"^[\[\(\"'“‘]*[A-Za-z0-9][A-Za-z0-9'’.,:;/()&%$#@+\-–—!?\]\"”]*$")
+
+
+def _unreadable(tokens: list[Token]) -> bool:
+    """True when most 'words' of a text layer are not words (garbage OCR layer, broken font encoding)."""
+    words = [t.text for t in tokens if t.kind == "word"]
+    if len(words) < 8:
+        return False
+    if sum("(cid:" in w or "\ufffd" in w for w in words) > 0.2 * len(words):
+        return True
+    good = sum(1 for w in words if _WORDLIKE.match(w) and sum(c.isalnum() for c in w) >= max(1, len(w) // 2))
+    return good < 0.5 * len(words)
 
 
 # --------------------------------------------------------------------------- entry point
@@ -216,6 +241,13 @@ def read_pdf(path: str | Path, *, ocr: bool | str = "auto", placeholders: bool =
                            "(pip install pytesseract, and install the tesseract program)")
     run_ocr = bool(ocr) and ocr_engine.available()
     reader = PdfReader(str(path))
+    if reader.is_encrypted:
+        try:
+            ok = reader.decrypt("")
+        except Exception:
+            ok = 0
+        if not ok:
+            raise RuntimeError("this PDF is password-protected; it cannot be read without its password")
     pages: list[PageData] = []
     with pdfplumber.open(str(path)) as pdf:
         for i, page in enumerate(pdf.pages):
@@ -230,6 +262,12 @@ def read_pdf(path: str | Path, *, ocr: bool | str = "auto", placeholders: bool =
                 for w in words
             ]
             pd.has_text = bool(tokens)
+            pd.text_layer = "good" if tokens else "none"
+            if tokens and _unreadable(tokens):
+                # a garbage text layer (bad scanner OCR, broken font encoding) is not trusted
+                tokens = []
+                pd.has_text = False
+                pd.text_layer = "unreadable"
             tokens = _normalise_checkbox_tokens(tokens)
             tokens += _visual_checkboxes(path, page, number, tokens)
             form = _form_tokens(reader, i, number, placeholders)
@@ -239,10 +277,14 @@ def read_pdf(path: str | Path, *, ocr: bool | str = "auto", placeholders: bool =
                 f.x0 - 2 <= t.cx <= f.x1 + 2 and f.top - 2 <= t.cy <= f.bottom + 2 for f in form))]
             tokens += form
             pd.marks = _ink_marks(page, number, W, H)
+            # drawn boxes that hold (or could hold) a value: wide, one text line tall
+            pd.boxes = [(r["x0"], r["top"], r["x1"], r["bottom"]) for r in page.rects
+                        if r["x1"] - r["x0"] >= 20 and 9 <= r["bottom"] - r["top"] <= 40
+                        and r["x1"] - r["x0"] < 0.95 * W]
             if not pd.has_text and not form:
                 big = [im for im in page.images
                        if (im["x1"] - im["x0"]) * (im["bottom"] - im["top"]) > 0.5 * W * H]
-                if big:
+                if big or pd.text_layer == "unreadable":
                     pd.image_only = True
                     pd.marks = []
                     if run_ocr:
@@ -250,9 +292,29 @@ def read_pdf(path: str | Path, *, ocr: bool | str = "auto", placeholders: bool =
                         tokens = _normalise_checkbox_tokens(res.tokens)
                         pd.marks = res.marks
                         pd.deskew_angle = res.angle
+                        pd.rotation = res.rotation
+                        pd.width, pd.height = res.width, res.height
                         pd.ocr_used = True
-            # drop running headers/footers in the outer margins
-            tokens = [t for t in tokens if t.top < H - FOOTER_MARGIN or t.kind != "word"]
+            elif run_ocr and pd.has_text:
+                # a digital page carrying an embedded scan: read the scan too
+                scans = [im for im in page.images
+                         if (im["x1"] - im["x0"]) * (im["bottom"] - im["top"]) > 0.25 * W * H]
+                for im in scans:
+                    inside = [t for t in tokens if im["x0"] <= t.cx <= im["x1"] and im["top"] <= t.cy <= im["bottom"]]
+                    if len(inside) >= 5:
+                        continue
+                    res = ocr_engine.ocr_page(path, number, W, H, deskew=False, orient=False)
+                    extra = [t for t in res.tokens if im["x0"] <= t.cx <= im["x1"] and im["top"] <= t.cy <= im["bottom"]
+                             and not any(o.x0 <= t.cx <= o.x1 and o.top <= t.cy <= o.bottom for o in tokens)]
+                    tokens += _normalise_checkbox_tokens(extra)
+                    pd.marks += [m for m in res.marks if im["x0"] <= (m.x0 + m.x1) / 2 <= im["x1"]
+                                 and im["top"] <= m.cy <= im["bottom"]]
+                    pd.ocr_regions += 1
+                    pd.ocr_used = True
             pd.tokens = tokens
             pages.append(pd)
+    # running headers and footers are kept but marked, so they are never read as data
+    from .layout import mark_furniture
+
+    mark_furniture(pages)
     return pages

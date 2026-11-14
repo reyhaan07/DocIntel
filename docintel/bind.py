@@ -9,10 +9,11 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-from .layout import (Cell, Table, bbox_of, build_lines, build_regions, find_table, join_tokens, match_aliases,
-                     region_lines)
+from .layout import (Cell, Table, bbox_of, build_lines, build_regions, checkbox_options, continuation_tokens,
+                     continue_table, find_table, join_tokens, match_aliases, region_lines)
 from .models import Attribute, Entity, Line, PageData, Region, Token
-from .normalize import clean, label_text, name_key, normalise, split_list, split_person_name
+from .normalize import (clean, infer_date_order, is_ambiguous_date, label_text, name_key, normalise, split_list,
+                        split_person_name)
 from .template import Template, norm, norm_tokens
 
 TYPE_NAMES = {
@@ -41,6 +42,29 @@ def _method(tokens: list[Token], kind: str) -> tuple[str, float]:
     return f"layout_{tag}", base
 
 
+# Words that turn a known label into a different field: "Work Phone" is not the
+# patient's phone, "Spouse Name" is not the patient's name.
+QUALIFIERS = {
+    "work", "home", "cell", "office", "business", "fax", "alternate", "alt", "other", "secondary", "previous",
+    "former", "maiden", "spouse", "partner", "mother", "father", "parent", "guardian", "employer", "pharmacy",
+    "physician", "doctor", "referring", "insured", "subscriber", "holder", "billing", "mailing", "emergency",
+    "school", "child", "sibling", "nearest", "witness", "interpreter", "agent", "representative", "provider",
+    "facility", "clinic", "hospital", "company", "contact",
+}
+
+
+def _qualified(tokens: list[Token], i: int, labels) -> bool:
+    """Is the label starting at tokens[i] really the tail of a longer, different label?"""
+    if i == 0:
+        return False
+    prev = tokens[i - 1]
+    if prev.kind != "word" or prev.text.endswith(":") or tokens[i].x0 - prev.x1 >= 5:
+        return False
+    if labels and labels[-1][1] == i - 1:  # the word is the only value of the label before it
+        return False
+    return norm(prev.text) in QUALIFIERS
+
+
 def _parse_kv_line(tokens: list[Token], table) -> list[tuple[dict | None, list[Token], list[Token]]]:
     """Split one line into (field spec | None, label tokens, value tokens) triples."""
     labels: list[tuple[int, int, dict | None]] = []
@@ -50,6 +74,8 @@ def _parse_kv_line(tokens: list[Token], table) -> list[tuple[dict | None, list[T
         t = tokens[i]
         if t.kind == "word":
             m = match_aliases(tokens, i, table)
+            if m and _qualified(tokens, i, labels):
+                m = None  # handled below as a label of its own ("Work Phone:")
             if m:
                 consumed, spec = m
                 last = tokens[i + consumed - 1]
@@ -108,6 +134,11 @@ class Binder:
         self.unbound: list[dict] = []
         self.sections_seen: list[str] = []
         self.marks = [m for p in pages for m in p.marks]
+        self.continued: set[int] = set()  # tokens joined to a value from the following line
+        self._unclear_lines: set[int] = set()  # yes/no lines where a box or an answer was not readable
+        # day/month order of numeric dates, decided once for the whole document
+        self.date_order = infer_date_order([t.text for p in pages for t in p.tokens if t.kind == "word"])
+        self.parse_order = "dmy" if self.date_order == "dmy" else "mdy"
 
     # ------------------------------------------------------------------ helpers
     def lines(self, region: Region) -> list[Line]:
@@ -147,11 +178,17 @@ class Binder:
             row=row, order=(page or 0, anchor[1], anchor[0]),
         )
 
+    def _flag_continued(self, attr: Attribute, vtoks: list[Token]) -> None:
+        if any(id(t) in self.continued for t in vtoks):
+            attr.notes.append("value continues on the next line; the two lines were joined - confirm")
+            if attr.status == "valid":
+                attr.status = "needs_review"
+
     def add_missing(self, kind: str, path: str, label: str, reason: str, entity: str | None = None,
                     region: Region | None = None):
         self.missing.append({
             "kind": kind, "path": path, "label": label, "reason": reason, "entity": entity,
-            "section": region.name if region else None, "page": region.page if region else None,
+            "section": region.name if region else None, "page": region.hpage if region else None,
             "bbox": region.heading_bbox if region else None,
         })
 
@@ -181,10 +218,21 @@ class Binder:
 
     # ------------------------------------------------------------------ record sections
     def _kv_pairs(self, spec, regions, fields=None):
+        """(region, line, field spec, label tokens, value tokens) for every label on the
+        section's lines.  A value that continues on the next line is extended with it
+        (and marked by ``self.continued``) so it is never split or dropped."""
         table = Template.alias_table(fields or spec["fields"])
         for region in regions:
-            for ln in self.lines(region):
-                for fspec, ltoks, vtoks in _parse_kv_line(ln.tokens, table):
+            lines = self.lines(region)
+            for k, ln in enumerate(lines):
+                pairs = _parse_kv_line(ln.tokens, table)
+                for n, (fspec, ltoks, vtoks) in enumerate(pairs):
+                    if vtoks and not self.scan:
+                        right = pairs[n + 1][1][0].x0 - 4 if n + 1 < len(pairs) else region.x1
+                        extra = continuation_tokens(lines, k, vtoks, right)
+                        if extra:
+                            vtoks = vtoks + extra
+                            self.continued.update(id(t) for t in extra)
                     yield region, ln, fspec, ltoks, vtoks
 
     def bind_record(self, spec, regions):
@@ -206,9 +254,10 @@ class Binder:
             raw = clean(join_tokens(vtoks))
             if not raw:
                 continue
-            value, ok = normalise(raw, fspec.get("type", "text"))
+            value, ok = normalise(raw, fspec.get("type", "text"), self.parse_order)
             attr = self.make_attr(value, ltoks, vtoks, "key_value", region, raw=raw)
-            _type_notes(attr, raw, value, ok, fspec.get("type", "text"))
+            _type_notes(attr, raw, value, ok, fspec.get("type", "text"), self.date_order)
+            self._flag_continued(attr, vtoks)
             found[key] = attr
         if self.scan:
             return None
@@ -230,7 +279,7 @@ class Binder:
         elif espec["type"] == "InsurancePolicy":
             ent.attributes["policy_type"] = Attribute(
                 value=spec.get("policy_type"), field_label=f"section heading '{region0.heading}'",
-                page=region0.page, bbox=region0.heading_bbox, extraction_method="section_heading", confidence=0.95,
+                page=region0.hpage, bbox=region0.heading_bbox, extraction_method="section_heading", confidence=0.95,
                 section=region0.name, region_id=region0.region_id,
                 order=(region0.page, region0.heading_bbox[1] - 0.1, region0.heading_bbox[0]))
             company = found.get("insurance_company")
@@ -295,11 +344,18 @@ class Binder:
 
     # ------------------------------------------------------------------ tables
     def _tables(self, spec, regions) -> list[tuple[Region, Table]]:
+        """The section's table in every region, including its continuation on the next
+        page when the header is not repeated there."""
         out = []
+        prev = None
         for region in regions:
-            t = find_table(self.lines(region), spec["columns"], region)
+            lines = self.lines(region)
+            t = find_table(lines, spec["columns"], region)
+            if t is None and prev is not None and region.continued:
+                t = continue_table(lines, prev)
             if t:
                 out.append((region, t))
+                prev = t
         return out
 
     def bind_table(self, spec, regions):
@@ -338,10 +394,10 @@ class Binder:
             raw = cell.text
             if not raw:
                 continue
-            value, ok = normalise(raw, cspec.get("type", "text"))
+            value, ok = normalise(raw, cspec.get("type", "text"), self.parse_order)
             wrapped = ckey in row.wrapped_columns
             attr = self.make_attr(value, htoks, cell.all_tokens, "table", region, raw=raw, row=rowno)
-            _type_notes(attr, raw, value, ok, cspec.get("type", "text"))
+            _type_notes(attr, raw, value, ok, cspec.get("type", "text"), self.date_order)
             if wrapped:
                 attr.confidence = WRAPPED_CONF
                 attr.status = "needs_review"
@@ -396,15 +452,9 @@ class Binder:
         for region in regions:
             for ln in self.lines(region):
                 toks = ln.tokens
-                i = 0
-                while i < len(toks):
-                    t = toks[i]
-                    if t.kind == "checkbox":
-                        j = i + 1
-                        lab = []
-                        while j < len(toks) and toks[j].kind == "word" and (not lab or toks[j].x0 - lab[-1].x1 < 20):
-                            lab.append(toks[j])
-                            j += 1
+                if any(t.kind == "checkbox" for t in toks):
+                    _, opts, trailing = checkbox_options(toks)
+                    for t, lab in opts:
                         text = clean(" ".join(x.text for x in lab))
                         m = match_aliases(lab, 0, opt_table) if lab else None
                         if self.scan:
@@ -416,8 +466,10 @@ class Binder:
                             ent.extra["owner_hint"] = "patient"
                             ent.extra["option"] = m[1]["key"] if m else None
                             out.append(ent)
-                        i = j
-                        continue
+                    toks = trailing
+                i = 0
+                while i < len(toks):
+                    t = toks[i]
                     # "Other: ..." free text
                     w = norm_tokens(t.text)
                     hit = None
@@ -478,7 +530,7 @@ class Binder:
                         if k == "relation" or not row.cells[k].text:
                             continue
                         cell = row.cells[k]
-                        value, _ = normalise(cell.text, cspec.get("type", "text"))
+                        value, _ = normalise(cell.text, cspec.get("type", "text"), self.parse_order)
                         ent.attributes[k] = self.make_attr(value, htoks, cell.all_tokens, "table", region, raw=cell.text)
                     self._family_conditions(ent, ent.attributes.get("conditions"), region,
                                             row.cells["conditions"].all_tokens if "conditions" in row.cells else [])
@@ -530,19 +582,20 @@ class Binder:
 
     # ------------------------------------------------------------------ yes / no questions
     def _yes_no_line(self, toks: list[Token]):
-        boxes = []
-        for i, t in enumerate(toks):
-            if t.kind == "checkbox":
-                lab = toks[i + 1] if i + 1 < len(toks) and toks[i + 1].kind == "word" else None
-                boxes.append((t, lab))
-        if not boxes:
+        question, opts, trailing = checkbox_options(toks)
+        if not opts:
             return None
-        first_box = toks.index(boxes[0][0])
-        question = [t for t in toks[:first_box] if t.kind == "word"]
+        boxes = [(b, lab[0] if lab else None) for b, lab in opts]
         yes = [(b, l) for b, l in boxes if l is not None and norm(l.text) in ("yes", "y")]
         no = [(b, l) for b, l in boxes if l is not None and norm(l.text) in ("no", "n")]
         if not yes and not no:
             return None
+        # an answer printed without a readable box, or a box without a readable answer,
+        # means part of the line was not seen: the decision cannot be trusted
+        attached = {id(l) for _, l in boxes if l is not None}
+        loose = [t for t in question + trailing if norm(t.text) in ("yes", "no") and id(t) not in attached]
+        if loose or any(l is None for _, l in boxes):
+            self._unclear_lines.add(id(question[0]) if question else id(boxes[0][0]))
         return question, yes, no, boxes
 
     @staticmethod
@@ -560,6 +613,9 @@ class Binder:
 
     def _consent(self, key, label, question, yes, no, region) -> Entity:
         decision, problem = self._decide(yes, no)
+        anchor = id(question[0]) if question else id((yes + no)[0][0]) if (yes + no) else None
+        if problem is None and anchor in self._unclear_lines:
+            problem = "part of this answer line could not be read (a box or its Yes/No label is missing)"
         chosen = [(b, l) for b, l in yes + no if b.checked] or (yes + no)
         vt = [x for b, l in chosen for x in (b, l)]
         ent = self.new_entity("Consent", "CONS", label, region, "Consents")
@@ -682,14 +738,17 @@ class Binder:
                 continue
             if not raw:
                 continue
-            value, _ = normalise(raw, fspec.get("type", "text"))
-            found[key] = (self.make_attr(value, ltoks, vtoks, "key_value", region, raw=raw), ltoks)
+            value, ok = normalise(raw, fspec.get("type", "text"), self.parse_order)
+            attr = self.make_attr(value, ltoks, vtoks, "key_value", region, raw=raw)
+            _type_notes(attr, raw, value, ok, fspec.get("type", "text"), self.date_order)
+            self._flag_continued(attr, vtoks)
+            found[key] = (attr, ltoks)
         if self.scan:
             return None
         ent = self.new_entity(espec["type"], espec["prefix"], spec["name"], region0, espec["group"])
         ent.extra["agreement_key"] = spec["key"]
         ent.attributes["title"] = Attribute(
-            value=spec["name"], field_label=region0.heading, page=region0.page, bbox=region0.heading_bbox,
+            value=spec["name"], field_label=region0.heading, page=region0.hpage, bbox=region0.heading_bbox,
             extraction_method="section_heading", confidence=0.95, section=region0.name, region_id=region0.region_id,
             order=(region0.page, region0.heading_bbox[1], 0))
         for k, (attr, _) in found.items():
@@ -719,9 +778,10 @@ class Binder:
 
 
 # --------------------------------------------------------------------------- free-text helpers
-def _type_notes(attr: Attribute, raw: str, value, ok: bool, vtype: str) -> None:
-    """Explain corrections and doubtful formats.  An OCR value that had to be corrected,
-    or that does not fit its type, goes to review instead of being trusted."""
+def _type_notes(attr: Attribute, raw: str, value, ok: bool, vtype: str, date_order: str | None = "mdy") -> None:
+    """Explain corrections and doubtful formats.  A value that does not fit its field's
+    type, a value OCR had to correct, or a date whose day/month order cannot be told
+    apart goes to review instead of being trusted."""
     ocr = attr.extraction_method.startswith("ocr")
     if vtype in ("dosage", "year") and isinstance(value, str) and value.replace(" ", "") != raw.replace(" ", ""):
         attr.notes.append(f"read as '{raw}', corrected to '{value}'")
@@ -729,9 +789,13 @@ def _type_notes(attr: Attribute, raw: str, value, ok: bool, vtype: str) -> None:
             attr.status = "needs_review"
     if not ok and vtype not in ("text", "person_name", "lower", "list"):
         attr.notes.append(f"value '{raw}' does not look like a {vtype.replace('_', ' ')}")
-        if ocr and attr.status == "valid":
+        if attr.status == "valid":
             attr.status = "needs_review"
-
+    if vtype == "date" and ok and date_order not in ("mdy", "dmy") and is_ambiguous_date(raw):
+        attr.notes.append(f"'{raw}' could be read day-first or month-first and nothing else on the document "
+                          f"settles it; read as {value}")
+        if attr.status == "valid":
+            attr.status = "needs_review"
 
 
 def _split_tokens(tokens: list[Token]) -> list[tuple[str, list[Token]]]:

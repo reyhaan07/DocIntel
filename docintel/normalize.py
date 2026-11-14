@@ -16,7 +16,40 @@ def label_text(text: str) -> str:
     return clean(text).rstrip(":?").strip()
 
 
-def parse_date(text: str) -> str | None:
+_NUM_DATE = re.compile(r"(?<![\d/.-])(\d{1,2})[-/.](\d{1,2})[-/.](\d{2}|\d{4})(?![\d/.-])")
+_US_HINT = re.compile(r"\(\d{3}\)\s?\d{3}-\d{4}|\b\d{3}[-.]\d{3}[-.]\d{4}\b|\b[A-Z]{2}\s\d{5}(-\d{4})?\b")
+
+
+def infer_date_order(texts: list[str]) -> str | None:
+    """Day/month order of numeric dates on one document: 'mdy', 'dmy', 'mixed' or None.
+
+    Decided by unambiguous dates on the same document (13/05/2024 is day-first);
+    without any, US phone or ZIP formats suggest month-first."""
+    joined = " ".join(texts)
+    mdy = dmy = 0
+    for m in _NUM_DATE.finditer(joined):
+        a, b = int(m.group(1)), int(m.group(2))
+        if a > 12 >= b:
+            dmy += 1
+        elif b > 12 >= a:
+            mdy += 1
+    if mdy and dmy:
+        return "mixed"
+    if mdy:
+        return "mdy"
+    if dmy:
+        return "dmy"
+    if _US_HINT.search(joined):
+        return "mdy"
+    return None
+
+
+def is_ambiguous_date(text: str) -> bool:
+    m = re.fullmatch(r"(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})", clean(text))
+    return bool(m) and int(m.group(1)) <= 12 and int(m.group(2)) <= 12 and m.group(1).lstrip("0") != m.group(2).lstrip("0")
+
+
+def parse_date(text: str, order: str = "mdy") -> str | None:
     t = clean(text)
     m = re.fullmatch(r"(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})", t)
     if m:
@@ -24,19 +57,29 @@ def parse_date(text: str) -> str | None:
     else:
         m = re.fullmatch(r"(\d{1,2})[-/.](\d{1,2})[-/.](\d{2,4})", t)
         if m:
-            mo, d, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+            if order == "dmy":
+                d, mo, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
+                if mo > 12 and d <= 12:
+                    mo, d = d, mo
+            else:
+                mo, d, y = int(m.group(1)), int(m.group(2)), int(m.group(3))
             if y < 100:
                 y += 1900 if y > 30 else 2000
             if mo > 12 and d <= 12:
                 mo, d = d, mo
         else:
-            m = re.fullmatch(r"([A-Za-z]{3,})\.?\s+(\d{1,2}),?\s+(\d{4})", t)
-            if not m:
+            m = re.fullmatch(r"([A-Za-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})", t)
+            m2 = re.fullmatch(r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,})\.?,?\s+(\d{4})", t)
+            if m:
+                mo = _MONTHS.get(m.group(1)[:3].lower())
+                d, y = int(m.group(2)), int(m.group(3))
+            elif m2:
+                mo = _MONTHS.get(m2.group(2)[:3].lower())
+                d, y = int(m2.group(1)), int(m2.group(3))
+            else:
                 return None
-            mo = _MONTHS.get(m.group(1)[:3].lower())
             if not mo:
                 return None
-            d, y = int(m.group(2)), int(m.group(3))
     try:
         return date(y, mo, d).isoformat()
     except ValueError:
@@ -52,13 +95,13 @@ def format_phone(text: str) -> str:
     return clean(text)
 
 
-def normalise(value: str, vtype: str):
+def normalise(value: str, vtype: str, date_order: str = "mdy"):
     """Return (normalised value, ok).  ``ok`` is False when the text does not fit the type."""
     v = clean(value)
     if not v:
         return None, False
     if vtype == "date":
-        iso = parse_date(v)
+        iso = parse_date(v, date_order)
         return (iso, True) if iso else (v, False)
     if vtype == "phone":
         p = format_phone(v)

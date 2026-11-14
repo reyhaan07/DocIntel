@@ -1,0 +1,95 @@
+{
+ "document": "scan_K_bad_text_layer",
+ "document_type": "patient intake",
+ "values": {
+  "Agreement[Consent for Treatment].date": "2026-03-10",
+  "Agreement[Consent for Treatment].printed_name": "Thomas Becker",
+  "Agreement[Consent for Treatment].signature": "/s/ Thomas Becker",
+  "Agreement[Consent for Treatment].title": "Consent for Treatment",
+  "Consent[email].decision": "yes",
+  "Consent[email].topic": "email",
+  "Consent[text message].decision": "no",
+  "Consent[text message].topic": "text message",
+  "Consent[voicemail].decision": "yes",
+  "Consent[voicemail].topic": "voicemail",
+  "Doctor[Dr. Karen Holt].name": "Dr. Karen Holt",
+  "EmergencyContact.full_name": "Lisa Becker",
+  "EmergencyContact.phone": "(812) 555-0135",
+  "EmergencyContact.relationship": "wife",
+  "Field[Alt Phone].value": "(812) 555-0136",
+  "Field[Work Phone].value": "(812) 555-0199",
+  "Medication[Aspirin].dosage": "81 mg",
+  "Medication[Aspirin].frequency": "Daily",
+  "Medication[Aspirin].name": "Aspirin",
+  "Medication[Atorvastatin].dosage": "40 mg",
+  "Medication[Atorvastatin].frequency": "Daily",
+  "Medication[Atorvastatin].name": "Atorvastatin",
+  "Medication[Atorvastatin].prescribing_doctor": "Dr. Karen Holt",
+  "Patient.address": "1450 North Walnut Street Unit 12",
+  "Patient.city": "Bloomington",
+  "Patient.date_of_birth": "1964-08-19",
+  "Patient.email": "t.becker@example.com",
+  "Patient.first_name": "Thomas",
+  "Patient.full_name": "Thomas Becker",
+  "Patient.last_name": "Becker",
+  "Patient.phone": "(812) 555-0134",
+  "Patient.sex": "male",
+  "Patient.state": "IN",
+  "Patient.zip": "47401",
+  "Section[Emergency Contact].title": "Emergency Contact",
+  "Section[Patient Information].title": "Patient Information"
+ },
+ "relationships": [
+  [
+   "Medication[Atorvastatin]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Karen Holt]"
+  ],
+  [
+   "Patient",
+   "HAS_EMERGENCY_CONTACT",
+   "EmergencyContact"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[email]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[text message]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[voicemail]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Consent for Treatment]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Aspirin]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Atorvastatin]"
+  ],
+  [
+   "Section[Emergency Contact]",
+   "CONTAINS",
+   "Field[Alt Phone]"
+  ],
+  [
+   "Section[Patient Information]",
+   "CONTAINS",
+   "Field[Work Phone]"
+  ]
+ ],
+ "note": "scan of intake_F_tight_labels.pdf with a garbage text layer: same answers"
+}

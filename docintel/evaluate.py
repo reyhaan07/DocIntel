@@ -161,17 +161,33 @@ def compare(doc: dict, truth: dict) -> dict:
 
 
 def evaluate_folder(input_dir: str | Path, truth_dir: str | Path, ocr="auto") -> dict:
-    from .pipeline import process_pdf
+    """Process every file (PDF or image) that has a ground-truth file and compare.  A truth
+    file for a file holding several forms lists one truth per form under "packets"."""
+    import tempfile
+
+    from .pipeline import IMAGE_TYPES, process_file
 
     input_dir, truth_dir = Path(input_dir), Path(truth_dir)
     reports = []
-    for pdf in sorted(input_dir.glob("*.pdf")):
-        tfile = truth_dir / f"{pdf.stem}.json"
+    for src in sorted(f for f in input_dir.iterdir() if f.suffix.lower() in {".pdf", *IMAGE_TYPES}):
+        tfile = truth_dir / f"{src.stem}.json"
         if not tfile.exists():
             continue
         truth = json.loads(tfile.read_text(encoding="utf-8"))
-        doc = process_pdf(pdf, ocr=ocr)
-        reports.append(compare(doc, truth))
+        with tempfile.TemporaryDirectory() as tmp:
+            docs = process_file(src, lambda k, n, g: {"doc_id": f"DOC_{k:03d}",
+                                                      "source_path": Path(tmp) / f"{k}.pdf"}, ocr=ocr)
+        truths = truth.get("packets") or [truth]
+        if len(docs) != len(truths):
+            reports.append({"document": src.name, "status": "split mismatch", "value_accuracy": 0.0,
+                            "relationship_recall": 0.0, "silent_errors": 1, "flagged_errors": 0,
+                            "counts": {"values": sum(len(t["values"]) for t in truths)},
+                            "details": {"split": f"expected {len(truths)} forms, got {len(docs)}"}})
+            continue
+        for doc, t in zip(docs, truths):
+            rep = compare(doc, t)
+            rep["document"] = src.name if len(docs) == 1 else f"{src.name} [form {docs.index(doc) + 1}]"
+            reports.append(rep)
     total = Counter()
     for r in reports:
         total.update(r["counts"])

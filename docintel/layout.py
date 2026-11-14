@@ -209,11 +209,12 @@ def build_regions(pages: list[PageData], lines_by_page: dict[int, list[Line]], t
                 counter += 1
                 regions.append(Region(f"SEC_{counter:03d}", last_region.key, last_region.name, last_region.heading,
                                       pd.number, 0.0, 0.0, pd.width, first_top - 1, last_region.heading_bbox,
-                                      continued=True))
+                                      continued=True, heading_page=last_region.hpage))
         elif not spans and last_region is not None and page_lines:
             counter += 1
             regions.append(Region(f"SEC_{counter:03d}", last_region.key, last_region.name, last_region.heading,
-                                  pd.number, 0.0, 0.0, pd.width, pd.height, last_region.heading_bbox, continued=True))
+                                  pd.number, 0.0, 0.0, pd.width, pd.height, last_region.heading_bbox, continued=True,
+                                  heading_page=last_region.hpage))
         for h, x0, x1 in spans:
             bottom = pd.height
             for h2, a0, a1 in spans:
@@ -278,6 +279,96 @@ def match_aliases(tokens: list[Token], start: int, table) -> tuple[int, dict] | 
     return None
 
 
+# --------------------------------------------------------------------------- multi-line values
+def continuation_tokens(lines: list[Line], k: int, value_tokens: list[Token], right_limit: float) -> list[Token]:
+    """Words on the next line that continue a value ("42 Elm Street" / "Apartment 3B").
+
+    Only a line set tight under the value (closer than a normal line gap), starting where
+    the value starts and carrying no label of its own qualifies."""
+    vt = [t for t in value_tokens if t.kind == "word" and t.text]
+    if not vt or k + 1 >= len(lines):
+        return []
+    ln, nxt = lines[k], lines[k + 1]
+    if nxt.page != ln.page:
+        return []
+    height = max(t.height for t in vt)
+    gap = nxt.top - max(t.bottom for t in vt)
+    # OCR boxes hug the glyphs (shorter than font boxes), so the same leading reads as a wider gap
+    limit = (0.6 if any(t.source == "ocr" for t in vt) else 0.45) * height
+    if gap < -1 or gap > limit:
+        return []
+    x0 = min(t.x0 for t in vt)
+    toks = [t for t in nxt.tokens if t.x0 >= x0 - 6 and t.x1 <= right_limit + 3]
+    if not toks or abs(min(t.x0 for t in toks) - x0) > 6:
+        return []
+    # nothing else on that line may sit left of the value, and the words carry no label
+    if any(t.x1 < x0 - 6 for t in nxt.tokens) or any(t.kind != "word" or t.text.endswith(":") for t in toks):
+        return []
+    return toks
+
+
+# --------------------------------------------------------------------------- check boxes
+def checkbox_options(tokens: list[Token]):
+    """Pair every check box on a line with its printed option label.
+
+    The side labels sit on is decided by spacing: a label is printed right next to its
+    box, the next option further away ("[X] Yes   [ ] No" vs "Yes [X]   No [ ]").  This
+    still holds when OCR misses a box or a word.  Returns (question tokens,
+    [(box, label tokens)], trailing tokens after the last option)."""
+    boxes = [i for i, t in enumerate(tokens) if t.kind == "checkbox"]
+    if not boxes:
+        return list(tokens), [], []
+    n = len(tokens)
+
+    def is_option_word(t):
+        return t.kind == "word" and not t.text.endswith(("?", ":"))
+
+    right = [tokens[i + 1].x0 - tokens[i].x1 for i in boxes if i + 1 < n and is_option_word(tokens[i + 1])]
+    left = [tokens[i].x0 - tokens[i - 1].x1 for i in boxes if i > 0 and is_option_word(tokens[i - 1])]
+    if right and left:
+        on_left = min(left) + 0.5 < min(right) or (abs(min(left) - min(right)) <= 0.5 and tokens[-1].kind == "checkbox")
+    else:
+        on_left = bool(left) and not right
+    opts: list[tuple[Token, list[Token]]] = []
+    if not on_left:  # labels on the right
+        trailing: list[Token] = []
+        for k, bi in enumerate(boxes):
+            end = boxes[k + 1] if k + 1 < len(boxes) else n
+            lab: list[Token] = []
+            j = bi + 1
+            while j < end and tokens[j].kind == "word" and (not lab or tokens[j].x0 - lab[-1].x1 < 20):
+                if tokens[j].text.endswith(":") and lab:  # "Other:" starts something new
+                    break
+                if not lab and tokens[j].x0 - tokens[bi].x1 > 20:
+                    break
+                lab.append(tokens[j])
+                j += 1
+            opts.append((tokens[bi], lab))
+            if k == len(boxes) - 1:
+                trailing = [t for t in tokens[j:]]
+        return [t for t in tokens[:boxes[0]] if t.kind == "word"], opts, trailing
+    # labels on the left: each box takes the closest words before it
+    question_end = None
+    for k, bi in enumerate(boxes):
+        start = boxes[k - 1] + 1 if k else 0
+        lab = []
+        j = bi - 1
+        while j >= start and tokens[j].kind == "word" and len(lab) < 3:
+            if lab and lab[0].x0 - tokens[j].x1 > 8:
+                break
+            if tokens[j].text.endswith(("?", ":")):  # the question ends here
+                break
+            if not lab and tokens[bi].x0 - tokens[j].x1 > 20:
+                break
+            lab.insert(0, tokens[j])
+            j -= 1
+        if k == 0:
+            question_end = j + 1
+        opts.append((tokens[bi], lab))
+    trailing = [t for t in tokens[boxes[-1] + 1:]]
+    return [t for t in tokens[:question_end or 0] if t.kind == "word"], opts, trailing
+
+
 # --------------------------------------------------------------------------- tables
 @dataclass
 class Cell:
@@ -337,37 +428,98 @@ def find_table(lines: list[Line], columns_spec: list[dict], region: Region, min_
             x0 = region.x0 if k == 0 else htoks[0].x0 - 6
             x1 = region.x1 if k == len(hits) - 1 else hits[k + 1][1][0].x0 - 6
             cols.append((spec, x0, x1, htoks))
-        rows: list[TableRow] = []
-        for ln2 in lines[li + 1:]:
-            if ln2.top < ln.bottom - 1:
-                continue
-            cells = {spec["key"]: Cell() for spec, *_ in cols}
-            stray = False
-            for t in ln2.tokens:
-                # the token's left edge decides its column; OCR boxes may start a few
-                # points early, so look a little into the token (never past its middle)
-                ax = t.x0 + (min(6.0, (t.x1 - t.x0) / 2) if t.source == "ocr" else 0.5)
-                for spec, x0, x1, _ in cols:
-                    if x0 <= ax < x1 or (spec is cols[-1][0] and ax >= x0):
-                        cells[spec["key"]].tokens.append(t)
-                        break
-                else:
-                    stray = True
-            if stray and not any(c.tokens for c in cells.values()):
-                continue
-            has_key = bool(cells[row_key["key"]].tokens)
-            others = [k for k, c in cells.items() if c.tokens and k != row_key["key"]]
-            # a line made of a single "Label:" pair is not a table row
-            if any(t.text.endswith(":") for c in cells.values() for t in c.tokens[:1]) and not has_key:
-                break
-            if has_key:
-                rows.append(TableRow(len(rows) + 1, cells, [ln2]))
-            elif others and rows:
-                prev = rows[-1]
-                for k in others:
-                    prev.cells[k].continued.extend(cells[k].tokens)
-                    if k not in prev.wrapped_columns:
-                        prev.wrapped_columns.append(k)
-                prev.lines.append(ln2)
+        rows = table_rows(lines[li + 1:], cols, row_key["key"], ln.bottom)
         return Table(ln, cols, rows)
     return None
+
+
+def table_rows(lines: list[Line], cols, key: str, after: float = -1e9) -> list[TableRow]:
+    """Rows of a table whose columns are known (from its header, or from the same table
+    on the previous page)."""
+    rows: list[TableRow] = []
+    for ln2 in lines:
+        if ln2.top < after - 1:
+            continue
+        cells = {spec["key"]: Cell() for spec, *_ in cols}
+        stray = False
+        for t in ln2.tokens:
+            # the token's left edge decides its column; OCR boxes may start a few
+            # points early, so look a little into the token (never past its middle)
+            ax = t.x0 + (min(6.0, (t.x1 - t.x0) / 2) if t.source == "ocr" else 0.5)
+            for spec, x0, x1, _ in cols:
+                if x0 <= ax < x1 or (spec is cols[-1][0] and ax >= x0):
+                    cells[spec["key"]].tokens.append(t)
+                    break
+            else:
+                stray = True
+        if stray and not any(c.tokens for c in cells.values()):
+            continue
+        has_key = bool(cells[key].tokens)
+        others = [k for k, c in cells.items() if c.tokens and k != key]
+        # a line made of a single "Label:" pair is not a table row
+        if any(t.text.endswith(":") for c in cells.values() for t in c.tokens[:1]) and not has_key:
+            break
+        if has_key:
+            rows.append(TableRow(len(rows) + 1, cells, [ln2]))
+        elif others and rows:
+            prev = rows[-1]
+            for k in others:
+                prev.cells[k].continued.extend(cells[k].tokens)
+                if k not in prev.wrapped_columns:
+                    prev.wrapped_columns.append(k)
+            prev.lines.append(ln2)
+    return rows
+
+
+def continue_table(lines: list[Line], table: Table) -> Table | None:
+    """The same table carried on from the previous page, without a repeated header:
+    its first line must fill at least two of the known columns and carry no labels."""
+    if not lines:
+        return None
+    first = lines[0]
+    if any(t.text.endswith(":") for t in first.tokens):
+        return None
+    filled = set()
+    for t in first.tokens:
+        for spec, x0, x1, _ in table.columns:
+            if x0 <= t.x0 + 0.5 < x1 or (spec is table.columns[-1][0] and t.x0 >= x0):
+                filled.add(spec["key"])
+                break
+    if len(filled) < 2:
+        return None
+    key = next((spec["key"] for spec, *_ in table.columns if spec.get("row_key")), table.columns[0][0]["key"])
+    rows = table_rows(lines, table.columns, key)
+    return Table(table.header, table.columns, rows) if rows else None
+
+
+# --------------------------------------------------------------------------- page furniture
+_FURNITURE = re.compile(r"\bpage\s*\d+(\s*(of|/)\s*\d+)?\b|^\s*\d+\s*(of|/)\s*\d+\s*$|\bform\s+[a-z0-9_-]*\d|"
+                        r"\brev(ision)?\.?\s*\d|©|\bconfidential\b|https?://|www\.", re.I)
+
+
+def mark_furniture(pages: list[PageData]) -> int:
+    """Running headers and footers (repeated on every page, or 'Page 2 of 3' / form
+    numbers in the margins) are page furniture: kept, but never read as data."""
+    bands: dict[tuple[str, str], set[int]] = {}
+    lines_by_page = {}
+    for pd in pages:
+        lines = build_lines([t for t in pd.tokens if t.kind == "word"])
+        lines_by_page[pd.number] = lines
+        for ln in lines:
+            band = "top" if ln.bottom < 0.09 * pd.height else "bottom" if ln.top > 0.91 * pd.height else None
+            if band:
+                key = re.sub(r"\d+", "#", " ".join(t.text for t in ln.tokens).lower())
+                bands.setdefault((band, key), set()).add(pd.number)
+    marked = 0
+    for pd in pages:
+        for ln in lines_by_page[pd.number]:
+            band = "top" if ln.bottom < 0.09 * pd.height else "bottom" if ln.top > 0.91 * pd.height else None
+            if not band:
+                continue
+            text = " ".join(t.text for t in ln.tokens)
+            key = re.sub(r"\d+", "#", text.lower())
+            if len(bands.get((band, key), ())) >= 2 or _FURNITURE.search(text):
+                for t in ln.tokens:
+                    t.kind = "furniture"
+                    marked += 1
+    return marked

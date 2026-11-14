@@ -18,9 +18,22 @@ import shutil
 import threading
 from pathlib import Path
 
-from .pipeline import process_pdf
+from .pipeline import process_file, process_pdf
 
 _ID = re.compile(r"^DOC_(\d{3,})$")
+
+
+def _failed(doc_id: str, filename: str, exc: Exception) -> dict:
+    return {"schema_version": "1.1", "document": {
+        "doc_id": doc_id, "filename": filename, "status": "failed", "error": str(exc), "page_count": 0,
+        "pages": [], "extraction_method": "none", "sha256": "", "processed_at": "", "document_type": "",
+        "template": None, "template_applied": False},
+        "summary": {k: 0 for k in ("entities", "traced_values", "relationships", "uncertain_relationships",
+                                   "review_items", "missing_items", "validation_errors", "fields_filled",
+                                   "fields_withheld")},
+        "sections": [], "entity_groups": [], "entities": {}, "relationships": [], "review_queue": [],
+        "missing": [], "validation": {"checks": [], "errors": [], "warnings": [], "check_catalog": []},
+        "unbound_values": [], "standardized": None, "coverage": {}}
 
 
 def index_row(doc: dict) -> dict:
@@ -99,28 +112,37 @@ class Store:
         return f"DOC_{n:03d}"
 
     # ------------------------------------------------------------------ mutations
-    def add(self, data: bytes, filename: str, *, ocr: bool | str | None = None) -> dict:
+    def add(self, data: bytes, filename: str, *, ocr: bool | str | None = None) -> list[dict]:
+        """Store and process one upload (PDF or image).  A file holding several separate
+        forms becomes several documents, one per form."""
+        import tempfile
+
+        ocr = self.ocr if ocr is None else ocr
+        made: list[str] = []
         with self.lock:
-            doc_id = self.next_id()
-            ddir = self.doc_dir(doc_id)
-            ddir.mkdir(parents=True)
-            self.source_path(doc_id).write_bytes(data)
-        try:
-            return self._process(doc_id, filename, ocr=ocr)
-        except Exception as exc:  # keep a record of the failure instead of losing the upload
-            doc = {"schema_version": "1.0", "document": {
-                "doc_id": doc_id, "filename": filename, "status": "failed", "error": str(exc), "page_count": 0,
-                "pages": [], "extraction_method": "none", "sha256": "", "processed_at": "", "document_type": "",
-                "template": "patient_intake_v1"},
-                "summary": {k: 0 for k in ("entities", "traced_values", "relationships", "uncertain_relationships",
-                                           "review_items", "missing_items", "validation_errors", "fields_filled",
-                                           "fields_withheld")},
-                "sections": [], "entity_groups": [], "entities": {}, "relationships": [], "review_queue": [],
-                "missing": [], "validation": {"checks": [], "errors": [], "warnings": [], "check_catalog": []},
-                "unbound_values": [], "standardized": None}
-            self.json_path(doc_id).write_text(json.dumps(doc, indent=2), encoding="utf-8")
+            with tempfile.TemporaryDirectory(prefix="docintel-up-") as tmp:
+                upload = Path(tmp) / (Path(filename).name or "upload.pdf")
+                upload.write_bytes(data)
+
+                def target(k, n, pages):
+                    doc_id = self.next_id()
+                    self.doc_dir(doc_id).mkdir(parents=True)
+                    made.append(doc_id)
+                    return {"doc_id": doc_id, "source_path": self.source_path(doc_id),
+                            "standardized_path": self.standardized_path(doc_id), "keep_source": True}
+
+                try:
+                    docs = process_file(upload, target, filename=filename, ocr=ocr)
+                except Exception as exc:  # keep a record of the failure instead of losing the upload
+                    doc_id = made[0] if made else self.next_id()
+                    self.doc_dir(doc_id).mkdir(parents=True, exist_ok=True)
+                    if not self.source_path(doc_id).exists():
+                        self.source_path(doc_id).write_bytes(data)
+                    docs = [_failed(doc_id, filename, exc)]
+            for doc in docs:
+                self.json_path(doc["document"]["doc_id"]).write_text(json.dumps(doc, indent=2), encoding="utf-8")
             self.write_index()
-            return doc
+        return docs
 
     def _process(self, doc_id: str, filename: str, *, ocr: bool | str | None = None) -> dict:
         ocr = self.ocr if ocr is None else ocr
@@ -199,10 +221,12 @@ class Store:
             return self.page_image(doc_id, kind, page).read_bytes()
 
     def seed(self, folder: str | Path, progress=None) -> list[dict]:
+        from .pipeline import IMAGE_TYPES
+
         out = []
-        files = sorted(Path(folder).glob("*.pdf"))
+        files = sorted(f for f in Path(folder).iterdir() if f.suffix.lower() in {".pdf", *IMAGE_TYPES})
         for i, pdf in enumerate(files, start=1):
             if progress:
                 progress(f"processing sample {i}/{len(files)}: {pdf.name}")
-            out.append(self.add(pdf.read_bytes(), pdf.name))
+            out.extend(self.add(pdf.read_bytes(), pdf.name))
         return out

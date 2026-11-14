@@ -1,0 +1,122 @@
+{
+ "document": "screening_I_stacked_two_pages.pdf",
+ "document_type": "unknown",
+ "values": {
+  "Field[Date of birth].value": "1991-11-30",
+  "Field[Date].value": "2025-10-06",
+  "Field[Email].value": "priya.raman@example.com",
+  "Field[Full name].value": "Priya Raman",
+  "Field[Mobile].value": "(312) 555-0172",
+  "Field[Volunteer ID].value": "LV-20931",
+  "Section[Declaration].title": "Declaration",
+  "Section[Vaccinations].title": "Vaccinations",
+  "Section[Volunteer].title": "Volunteer",
+  "Signature[Signature].signature": "ink signature",
+  "TableRow[COVID-19 booster].date_given": "2025-09-28",
+  "TableRow[COVID-19 booster].lot_number": "CV-7710",
+  "TableRow[COVID-19 booster].vaccine": "COVID-19 booster",
+  "TableRow[Hepatitis B (dose 1)].date_given": "2019-01-09",
+  "TableRow[Hepatitis B (dose 1)].lot_number": "HB-1185",
+  "TableRow[Hepatitis B (dose 1)].vaccine": "Hepatitis B (dose 1)",
+  "TableRow[Hepatitis B (dose 2)].date_given": "2019-02-11",
+  "TableRow[Hepatitis B (dose 2)].lot_number": "HB-1190",
+  "TableRow[Hepatitis B (dose 2)].vaccine": "Hepatitis B (dose 2)",
+  "TableRow[Hepatitis B (dose 3)].date_given": "2019-07-15",
+  "TableRow[Hepatitis B (dose 3)].lot_number": "HB-1212",
+  "TableRow[Hepatitis B (dose 3)].vaccine": "Hepatitis B (dose 3)",
+  "TableRow[Influenza].date_given": "2025-10-02",
+  "TableRow[Influenza].lot_number": "FL-2291",
+  "TableRow[Influenza].vaccine": "Influenza",
+  "TableRow[MMR].date_given": "1993-05-20",
+  "TableRow[MMR].lot_number": "MM-0042",
+  "TableRow[MMR].vaccine": "MMR",
+  "TableRow[Tetanus (Tdap)].date_given": "2021-06-14",
+  "TableRow[Tetanus (Tdap)].lot_number": "TD-0473",
+  "TableRow[Tetanus (Tdap)].vaccine": "Tetanus (Tdap)",
+  "TableRow[Varicella].date_given": "1995-08-03",
+  "TableRow[Varicella].lot_number": "VR-0388",
+  "TableRow[Varicella].vaccine": "Varicella"
+ },
+ "relationships": [
+  [
+   "Section[Declaration]",
+   "CONTAINS",
+   "Field[Date]"
+  ],
+  [
+   "Section[Declaration]",
+   "CONTAINS",
+   "Signature[Signature]"
+  ],
+  [
+   "Section[Vaccinations]",
+   "CONTAINS",
+   "TableRow[COVID-19 booster]"
+  ],
+  [
+   "Section[Vaccinations]",
+   "CONTAINS",
+   "TableRow[Hepatitis B (dose 1)]"
+  ],
+  [
+   "Section[Vaccinations]",
+   "CONTAINS",
+   "TableRow[Hepatitis B (dose 2)]"
+  ],
+  [
+   "Section[Vaccinations]",
+   "CONTAINS",
+   "TableRow[Hepatitis B (dose 3)]"
+  ],
+  [
+   "Section[Vaccinations]",
+   "CONTAINS",
+   "TableRow[Influenza]"
+  ],
+  [
+   "Section[Vaccinations]",
+   "CONTAINS",
+   "TableRow[MMR]"
+  ],
+  [
+   "Section[Vaccinations]",
+   "CONTAINS",
+   "TableRow[Tetanus (Tdap)]"
+  ],
+  [
+   "Section[Vaccinations]",
+   "CONTAINS",
+   "TableRow[Varicella]"
+  ],
+  [
+   "Section[Volunteer]",
+   "CONTAINS",
+   "Field[Date of birth]"
+  ],
+  [
+   "Section[Volunteer]",
+   "CONTAINS",
+   "Field[Email]"
+  ],
+  [
+   "Section[Volunteer]",
+   "CONTAINS",
+   "Field[Full name]"
+  ],
+  [
+   "Section[Volunteer]",
+   "CONTAINS",
+   "Field[Mobile]"
+  ],
+  [
+   "Section[Volunteer]",
+   "CONTAINS",
+   "Field[Volunteer ID]"
+  ],
+  [
+   "Signature[Signature]",
+   "DATED",
+   "Field[Date]"
+  ]
+ ]
+}

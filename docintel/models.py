@@ -19,12 +19,13 @@ class Token:
     bottom: float
     page: int
     source: str = "text"  # text | form_field | ocr | visual
-    kind: str = "word"  # word | checkbox | placeholder
+    kind: str = "word"  # word | checkbox | placeholder | furniture (running header/footer)
     checked: bool | None = None
     field_name: str | None = None
     bold: bool = False
     size: float = 0.0
     conf: float = 1.0
+    hint: str | None = None  # a form field's own description (tooltip), when it has one
 
     @property
     def bbox(self) -> list[float]:
@@ -44,6 +45,8 @@ class Token:
 
     @property
     def is_content(self) -> bool:
+        if self.kind == "furniture":  # running header / footer
+            return False
         return bool(self.text.strip()) or self.kind in ("checkbox", "placeholder")
 
 
@@ -79,6 +82,10 @@ class PageData:
     ocr_used: bool = False
     form_fields: int = 0
     deskew_angle: float = 0.0
+    rotation: int = 0  # clockwise quarter turn applied to read a sideways scan
+    boxes: list = field(default_factory=list)  # drawn value boxes (x0, top, x1, bottom)
+    text_layer: str = "none"  # none | good | unreadable (garbage replaced by OCR)
+    ocr_regions: int = 0  # embedded scans on a digital page that were read by OCR
 
 
 @dataclass
@@ -129,6 +136,11 @@ class Region:
     bottom: float
     heading_bbox: list[float]
     continued: bool = False
+    heading_page: int | None = None  # a continued region's heading is on an earlier page
+
+    @property
+    def hpage(self) -> int:
+        return self.heading_page or self.page
 
     def contains(self, t: Token | Mark) -> bool:
         cx = (t.x0 + t.x1) / 2
@@ -144,6 +156,7 @@ class Region:
             "page": self.page,
             "bbox": [round(self.x0, 1), round(self.top, 1), round(self.x1, 1), round(self.bottom, 1)],
             "heading_bbox": self.heading_bbox,
+            "heading_page": self.hpage,
             "continued": self.continued,
         }
 
