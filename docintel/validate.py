@@ -27,7 +27,10 @@ CHECKS = [
      "each consent has one resolved answer that matches its permissions"),
     ("signature_agreement_binding", "Signature agreement binding",
      "each signature belongs to exactly one agreement"),
+    ("text_coverage", "Text coverage",
+     "every piece of text on the page is accounted for: a value, a label, a heading or instructions"),
 ]
+GENERIC_ENTITY_TYPES = {"Field", "TableRow", "Question", "Signature"}
 
 
 def _inside(bbox, region, pad=1.0) -> bool:
@@ -35,7 +38,8 @@ def _inside(bbox, region, pad=1.0) -> bool:
     return region.x0 - pad <= cx <= region.x1 + pad and region.top - pad <= cy <= region.bottom + pad
 
 
-def validate(binder: Binder, rels: list[Relationship], template: Template) -> dict:
+def validate(binder: Binder, rels: list[Relationship], template: Template, structure=None, coverage=None,
+             template_used: bool = True) -> dict:
     ents = binder.entities
     regions = {r.region_id: r for r in binder.regions}
     pages = {p.number: p for p in binder.pages}
@@ -167,7 +171,7 @@ def validate(binder: Binder, rels: list[Relationship], template: Template) -> di
 
     # 7. signature agreement binding -----------------------------------------
     agrs = [e for e in ents.values() if e.type == "Agreement"]
-    agr_regions = [r for r in binder.regions if template.by_key[r.key]["kind"] == "agreement"]
+    agr_regions = [r for r in binder.regions if template.by_key.get(r.key, {}).get("kind") == "agreement"]
     issues, checked = [], 0
     for a in agrs:
         sig = a.attributes.get("signature")
@@ -186,6 +190,27 @@ def validate(binder: Binder, rels: list[Relationship], template: Template) -> di
         if n > 1:
             issues.append(issue(t, "agreement has more than one signer link", "error"))
     run("signature_agreement_binding", checked, issues)
+
+    # 8. text coverage ----------------------------------------------------------
+    if structure is not None:
+        from .generic import unexplained_tokens
+
+        issues = []
+        stray = unexplained_tokens(binder, structure)
+        for t in stray[:20]:
+            issues.append(issue(f"page {t.page}", f"text '{t.text}' could not be placed in any structure"))
+        if template_used:
+            by_section: dict[str, list[Entity]] = defaultdict(list)
+            for e in ents.values():
+                if e.type in GENERIC_ENTITY_TYPES:
+                    by_section[e.section or "(no section)"].append(e)
+            for sec, items in by_section.items():
+                known = any(e.section_key and not e.section_key.startswith("other:") for e in items)
+                for e in items[:10]:
+                    where = f"section '{sec}'" + ("" if known else " (not part of the template)")
+                    issues.append(issue(e.id, f"'{e.label}' in {where} is not part of the template; kept as a generic "
+                                              f"{e.type.lower().replace('tablerow', 'table row')}"))
+        run("text_coverage", (coverage or {}).get("tokens_total", 0), issues)
 
     errors = [dict(i, check=r["check_id"]) for r in results for i in r["issues"] if i["severity"] == "error"]
     warnings = [dict(i, check=r["check_id"]) for r in results for i in r["issues"] if i["severity"] != "error"]

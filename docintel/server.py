@@ -123,6 +123,34 @@ def create_app(data_dir: str | Path = "docintel_data", seed: str | Path | None =
     def ask_suggestions(request: Request):
         return JSONResponse({"suggestions": suggestions(_doc(request.path_params["doc_id"]))})
 
+    async def review_action(request: Request):
+        from starlette.concurrency import run_in_threadpool
+
+        from .review import ReviewError
+
+        doc_id, rev_id = request.path_params["doc_id"], request.path_params["review_id"]
+        _doc(doc_id)
+        try:
+            body = await request.json()
+        except Exception:
+            body = {}
+        try:
+            res = await run_in_threadpool(store.apply_review, doc_id, rev_id, body.get("action", ""),
+                                          body.get("value"), body.get("note"))
+        except ReviewError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=400)
+        d = res["document"]
+        return JSONResponse({"entry": res["entry"], "status": d["document"]["status"], "summary": d["summary"]})
+
+    def save_truth(request: Request):
+        doc_id = request.path_params["doc_id"]
+        _doc(doc_id)
+        try:
+            path = store.save_ground_truth(doc_id)
+        except ValueError as exc:
+            return JSONResponse({"error": str(exc)}, status_code=409)
+        return JSONResponse({"path": str(path), "file": path.name})
+
     def review_queue(request: Request):
         path = store.root / "review_queue.json"
         data = json.loads(path.read_text()) if path.exists() else {"items": [], "count": 0}
@@ -146,6 +174,8 @@ def create_app(data_dir: str | Path = "docintel_data", seed: str | Path | None =
         Route("/api/documents/{doc_id}/standardized.pdf", standardized_pdf),
         Route("/api/documents/{doc_id}/pages/{kind}/{page:int}.png", page_png),
         Route("/api/documents/{doc_id}/ask", ask_endpoint),
+        Route("/api/documents/{doc_id}/review/{review_id}", review_action, methods=["POST"]),
+        Route("/api/documents/{doc_id}/ground-truth", save_truth, methods=["POST"]),
         Route("/api/documents/{doc_id}/suggestions", ask_suggestions),
         Mount("/static", StaticFiles(directory=STATIC), name="static"),
     ]

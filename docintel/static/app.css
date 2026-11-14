@@ -298,6 +298,14 @@ code, .mono { font-family: var(--mono); }
 .spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border-2); border-top-color: var(--accent); border-radius: 50%; animation: sp .8s linear infinite; }
 @keyframes sp { to { transform: rotate(360deg); } }
 .nothing { color: var(--muted); padding: 18px 4px; }
+.ractions { display: flex; gap: 8px; margin-top: 9px; align-items: center; flex-wrap: wrap; }
+.ractions .fixval { background: var(--bg); border: 1px solid var(--border-2); border-radius: 6px; padding: 5px 8px; min-width: 220px; }
+.btn.sm { height: 27px; padding: 0 10px; font-size: 12.5px; }
+.btn.ok { color: var(--green); }
+.btn.ok:hover { background: var(--green-bg); border-color: rgba(63, 185, 80, .45); }
+.btn:disabled { opacity: .45; cursor: not-allowed; }
+.lcard.done { opacity: .62; }
+.resolved { color: var(--green); font-size: 12.5px; margin-top: 7px; }
 
 @media (max-width: 1180px) {
   body { overflow: auto; }

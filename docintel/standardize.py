@@ -114,12 +114,12 @@ class _Resolver:
 
     @lru_cache(maxsize=1)
     def _options(self):
-        fm = load_field_map(self.doc["document"].get("template", "patient_intake_v1"))
+        fm = load_field_map(self.doc["document"].get("template") or "patient_intake_v1")
         return tuple(v["path"].split(".")[-1] for v in fm["fields"].values() if v["path"].startswith("medical_history.options."))
 
 
 def placements(doc: dict, field_map: dict | None = None) -> list[dict]:
-    field_map = field_map or load_field_map(doc["document"].get("template", "patient_intake_v1"))
+    field_map = field_map or load_field_map(doc["document"].get("template") or "patient_intake_v1")
     res = _Resolver(doc)
     out = []
     for name, f in field_map["fields"].items():
@@ -133,7 +133,7 @@ def fill_standardized(doc: dict, out_path: str | Path, template_id: str | None =
     from pypdf import PdfReader, PdfWriter
     from pypdf.generic import NameObject
 
-    template_id = template_id or doc["document"].get("template", "patient_intake_v1")
+    template_id = template_id or doc["document"].get("template") or "patient_intake_v1"
     field_map = load_field_map(template_id)
     places = placements(doc, field_map)
     reader = PdfReader(str(reference_pdf(template_id)))

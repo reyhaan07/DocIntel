@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "docintel"
 version = "0.1.0"
-description = "Relationship-aware document understanding for patient intake forms"
+description = "Relationship-aware document understanding: entities, relationships and validated JSON from any PDF"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [

@@ -12,7 +12,7 @@ const ID_RE = /\b((?:PAT|SPO|EMC|INS|INSCO|MED|DR|ALG|COND|SURG|HOSP|FAM|CONS|AF
 
 const S = {
   docs: [], ocr: false, questions: {}, doc: null, id: null,
-  tab: "entities", relFilter: "all", view: "source", page: 1,
+  tab: "entities", relFilter: "all", revFilter: "open", view: "source", page: 1, editing: null,
   sel: null, boxes: [], refs: [], ask: { q: "find", a: "" }, askResult: null,
 };
 
@@ -90,7 +90,8 @@ function renderDoc() {
   b.textContent = STATUS[m.status] || m.status;
   $("#hName").textContent = m.filename;
   $("#hMeta").innerHTML = [
-    esc(m.document_type || "document"),
+    m.template_applied === false ? `<span title="No template matched: read with the template-free structure">document type not recognised</span>` : esc(m.document_type || "document"),
+    m.title ? `“${esc(m.title)}”` : "",
     `${m.page_count} page(s)`,
     `extraction: <b>${esc(m.extraction_method)}</b>`,
     m.sha256 ? `sha256 ${esc(m.sha256.slice(0, 12))}…` : "",
@@ -103,6 +104,11 @@ function renderDoc() {
   $("#dlStd").href = `/api/documents/${m.doc_id}/standardized.pdf`;
   $("#dlStd").hidden = !d.standardized;
   $("#ocrBtn").hidden = !(m.status === "needs_ocr" && S.ocr);
+  const open = d.review_queue.filter((r) => !r.resolution).length;
+  const truthBtn = $("#truthBtn");
+  truthBtn.hidden = !Object.keys(d.entities).length;
+  truthBtn.disabled = open > 0;
+  truthBtn.title = open ? `Resolve the ${open} open review item(s) first` : "Save this checked result as ground truth for the accuracy suite";
 
   const tiles = [
     [s.entities, "entities"], [s.traced_values, "traced values"], [s.relationships, "relationships"],
@@ -110,8 +116,9 @@ function renderDoc() {
     [s.review_items, "review items", s.review_items ? "amber" : ""],
     [s.missing_items, "missing items"],
     [s.validation_errors, "validation errors", s.validation_errors ? "red" : ""],
-    [s.fields_filled, `fields filled · ${s.fields_withheld} withheld`, "wide"],
+    [s.text_coverage == null ? "—" : `${Math.round(s.text_coverage * 1000) / 10}%`, "of text read"],
   ];
+  if (d.standardized) tiles.push([s.fields_filled, `fields filled · ${s.fields_withheld} withheld`, "wide"]);
   $("#stats").innerHTML = tiles.map(([n, l, c]) => `<div class="stat ${c || ""}"><div class="n">${n}</div><div class="l">${esc(l)}</div></div>`).join("");
   renderTabs();
   renderTab();
@@ -199,7 +206,7 @@ function entityCard(e) {
       <td class="v ${a.value == null ? "none" : ""}">${esc(fmtVal(a.value))}</td>
       <td class="lab">${esc(a.field_label || "")}</td>
       <td class="cf">${confHTML(a.confidence)}</td>
-      <td class="st"><span class="badge ${esc(a.status)}">${esc(ATTR_STATUS[a.status] || a.status)}</span></td>
+      <td class="st"><span class="badge ${esc(a.status)}" title="${a.reviewed ? `${esc(a.reviewed.action)} by ${esc(a.reviewed.by)}` : ""}">${a.reviewed ? (a.reviewed.action === "corrected" ? "Corrected" : "Reviewed") : esc(ATTR_STATUS[a.status] || a.status)}</span></td>
     </tr>`).join("");
   const rels = relsOf(e.id);
   const chips = rels.length ? `<div class="chips">${rels.map((r) => relChip(r, e.id)).join("")}</div>` : "";
@@ -238,20 +245,64 @@ function tabRelationships() {
   return h;
 }
 
+function reviewActions(it) {
+  if (it.resolution) {
+    const r = it.resolution;
+    const what = r.action === "correct" ? `corrected to “${esc(fmtVal(r.value))}”` : r.action === "reject" ? "rejected" : r.action === "dismiss" ? "dismissed" : "confirmed";
+    return `<div class="resolved">✓ ${what} by ${esc(r.by)} · ${esc(r.at)}</div>`;
+  }
+  if (S.editing === it.review_id) {
+    const cur = it.value == null ? "" : Array.isArray(it.value) ? it.value.join(", ") : String(it.value);
+    const input = it.attribute === "decision"
+      ? `<select class="fixval" aria-label="Correct value"><option value="yes">yes</option><option value="no">no</option></select>`
+      : `<input class="fixval" value="${esc(cur)}" aria-label="Correct value">`;
+    return `<div class="ractions">${input}<button type="button" class="btn primary sm" data-act="correct" data-rev="${it.review_id}">Save</button><button type="button" class="btn sm" data-act="cancel">Cancel</button></div>`;
+  }
+  const btn = (act, label, cls = "") => `<button type="button" class="btn sm ${cls}" data-act="${act}" data-rev="${it.review_id}">${label}</button>`;
+  if (it.kind === "attribute") return `<div class="ractions">${btn("confirm", "Confirm value", "ok")}${btn("edit", "Correct…")}</div>`;
+  if (it.kind === "relationship") return `<div class="ractions">${btn("confirm", "Confirm link", "ok")}${btn("reject", "Reject link", "danger")}</div>`;
+  if (it.kind === "validation") return `<div class="ractions">${btn("confirm", "Acknowledge", "ok")}</div>`;
+  return `<div class="ractions">${btn("dismiss", "Dismiss")}</div>`;
+}
+
 function tabReview() {
-  const q = S.doc.review_queue;
-  if (!q.length) return `<div class="nothing">Nothing needs a person - every value and link was confirmed by the checks.</div>`;
-  return q.map((it) => {
+  const all = S.doc.review_queue;
+  if (!all.length) return `<div class="nothing">Nothing needs a person - every value and link was confirmed by the checks.</div>`;
+  const open = all.filter((r) => !r.resolution), done = all.filter((r) => r.resolution);
+  const list = S.revFilter === "open" ? open : S.revFilter === "resolved" ? done : all;
+  let h = `<div class="filters" role="group">
+    <button type="button" data-rfilter="open" class="${S.revFilter === "open" ? "on" : ""}">Open ${open.length}</button>
+    <button type="button" data-rfilter="resolved" class="${S.revFilter === "resolved" ? "on" : ""}">Resolved ${done.length}</button>
+    <button type="button" data-rfilter="all" class="${S.revFilter === "all" ? "on" : ""}">All ${all.length}</button>
+  </div>`;
+  if (!list.length) return h + `<div class="nothing">${S.revFilter === "open" ? "All review items are resolved. You can save this result as ground truth." : "Nothing here yet."}</div>`;
+  return h + list.map((it) => {
     let body = "";
     if (it.kind === "relationship") {
       body += `<div class="l2">${idlink(it.subject)} ${esc(it.predicate)} ${idlink(it.object)}</div>`;
     }
     if (it.kind === "attribute") body += `<div class="l2">value: ${esc(fmtVal(it.value))}</div>`;
     const target = it.kind === "ocr" ? `<b>${esc(it.target)}</b>` : linkify(it.target);
-    return `<div class="lcard" data-sel="rev:${it.review_id}">
+    return `<div class="lcard ${it.resolution ? "done" : ""}" data-sel="rev:${it.review_id}">
       <div class="top"><div class="l1"><span class="rid">${esc(it.review_id)}</span> · ${target}</div><span class="badge kind">${esc(it.kind)}</span></div>
-      ${body}<div class="l1" style="margin-top:4px">${linkify(it.reason)}</div></div>`;
+      ${body}<div class="l1" style="margin-top:4px">${linkify(it.reason)}</div>${reviewActions(it)}</div>`;
   }).join("");
+}
+
+async function reviewAct(revId, action, value) {
+  try {
+    const r = await api(`/api/documents/${S.id}/review/${revId}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ action, value }),
+    });
+    S.editing = null;
+    toast(`<b>${esc(revId)}</b> ${esc(action === "correct" ? "corrected" : action === "reject" ? "rejected" : action + "ed")} — ${r.summary.review_items} open · ${esc(STATUS[r.status] || r.status)}`);
+    const keepTab = S.tab, keepSel = S.sel;
+    await loadDocs(S.id);
+    S.tab = keepTab;
+    renderTabs();
+    renderTab();
+    if (keepSel) select(keepSel);
+  } catch (e) { toast(esc(e.message), true); }
 }
 
 function tabMissing() {
@@ -291,10 +342,10 @@ function askExamples() {
   const unc = d.relationships.find((r) => r.support === "uncertain") || d.relationships[0];
   const cond = E.find((e) => e.type === "Condition");
   return {
-    find: cond ? cond.attributes.name.value.toLowerCase() : "",
-    entity: med ? med.id : "PAT_001",
-    owner: famCond ? famCond.id : cond ? cond.id : "PAT_001",
-    section: med && med.attributes.dosage ? `${med.id}.dosage` : "PAT_001.date_of_birth",
+    find: cond ? cond.attributes.name.value.toLowerCase() : (E.find((e) => e.type === "Field") ? String(E.find((e) => e.type === "Field").attributes.value.value).split(" ")[0] : ""),
+    entity: med ? med.id : (E[0] ? E[0].id : ""),
+    owner: famCond ? famCond.id : cond ? cond.id : (E.find((e) => e.type !== "Section") || {}).id || "",
+    section: med && med.attributes.dosage ? `${med.id}.dosage` : (E[0] ? `${E[0].id}.${Object.keys(E[0].attributes)[0]}` : ""),
     related: dr ? `${dr.id} PAT_001` : "",
     evidence: unc ? unc.relationship_id : "",
   };
@@ -627,6 +678,20 @@ function wire() {
     if (link) { e.stopPropagation(); handleRef(link.dataset.ref); return; }
     const f = e.target.closest("[data-filter]");
     if (f) { S.relFilter = f.dataset.filter; renderTab(); return; }
+    const rf = e.target.closest("[data-rfilter]");
+    if (rf) { S.revFilter = rf.dataset.rfilter; renderTab(); return; }
+    const act = e.target.closest("[data-act]");
+    if (act) {
+      e.stopPropagation();
+      const a = act.dataset.act;
+      if (a === "edit") { S.editing = act.dataset.rev; renderTab(); const inp = $("#tabBody .fixval"); if (inp) inp.focus(); return; }
+      if (a === "cancel") { S.editing = null; renderTab(); return; }
+      if (a === "correct") { const v = $("#tabBody .fixval").value; reviewAct(act.dataset.rev, "correct", v); return; }
+      if (a === "reject" && !confirm("Reject this link? It is removed from the result (kept in the audit log).")) return;
+      reviewAct(act.dataset.rev, a);
+      return;
+    }
+    if (e.target.closest(".fixval")) return;
     const s = e.target.closest("[data-sel]");
     if (s) select(parseSel(s.dataset.sel));
   });
@@ -674,6 +739,12 @@ function wire() {
     } catch (e) { toast(esc(e.message), true); }
     btn.disabled = false;
     btn.textContent = "Run OCR";
+  });
+  $("#truthBtn").addEventListener("click", async () => {
+    try {
+      const r = await api(`/api/documents/${S.id}/ground-truth`, { method: "POST" });
+      toast(`Saved as ground truth: <b>${esc(r.file)}</b>`);
+    } catch (e) { toast(esc(e.message), true); }
   });
   window.addEventListener("hashchange", () => {
     const id = decodeURIComponent(location.hash.slice(1));

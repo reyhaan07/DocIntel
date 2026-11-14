@@ -9,6 +9,7 @@ own header labels.
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
 
@@ -75,6 +76,8 @@ class Heading:
     text: str
     tokens: list[Token]
     page: int
+    name: str = ""
+    generic: bool = False  # recognised by its style, not by the template
 
     @property
     def x0(self):
@@ -93,8 +96,55 @@ class Heading:
         return max(t.bottom for t in self.tokens)
 
 
-def find_headings(lines: list[Line], template: Template) -> list[Heading]:
+def slug(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "_", text.lower()).strip("_")[:40] or "section"
+
+
+def _median(values, default=0.0):
+    v = sorted(values)
+    return v[len(v) // 2] if v else default
+
+
+def _page_style(lines: list[Line]) -> dict:
+    words = [t for ln in lines for t in ln.tokens if t.kind == "word" and t.text.strip()]
+    gaps = []
+    for a, b in zip(lines, lines[1:]):
+        if a.page == b.page and b.top > a.bottom:
+            gaps.append(b.top - a.bottom)
+    return {"size": _median([t.size for t in words if t.size], 0.0),
+            "height": _median([t.height for t in words], 9.0),
+            "gap": _median(gaps, 6.0)}
+
+
+def _generic_heading(ln: Line, prev: Line | None, style: dict) -> bool:
+    """A heading recognised by how it is printed: short, alphabetic, on its own line, and
+    set apart by weight, size, capitals or space above.  Used for sections the template
+    does not know, so that they still close the section above them."""
+    toks = ln.tokens
+    if any(t.kind != "word" for t in toks) or len(segments(ln)) != 1:
+        return False
+    text = " ".join(t.text for t in toks).strip()
+    words = re.findall(r"[A-Za-z][A-Za-z'&/-]*", text)
+    if not words or len(toks) > 6 or text[-1:] in ":?.,;" or not any(len(w) >= 3 for w in words):
+        return False
+    letters = sum(c.isalpha() for c in text)
+    if letters < 0.75 * len(text.replace(" ", "")):
+        return False
+    caps = all(w.isupper() for w in words if len(w) > 1) and any(len(w) >= 4 for w in words)
+    titled = all(w[0].isupper() for w in words if len(w) > 3)
+    bold = all(t.bold for t in toks if t.source == "text") and any(t.source == "text" for t in toks)
+    bigger = (style["size"] and min(t.size for t in toks if t.source == "text" or True) >= style["size"] + 1.5) or \
+        (all(t.source == "ocr" for t in toks) and _median([t.height for t in toks]) >= 1.2 * style["height"])
+    gap_above = prev is None or prev.page != ln.page or (ln.top - prev.bottom) >= max(9.0, 1.6 * style["gap"])
+    if caps and (bold or bigger or gap_above):
+        return True
+    return titled and (bold or bigger) and gap_above
+
+
+def find_headings(lines: list[Line], template: Template, generic: bool = True) -> list[Heading]:
     found = []
+    style = _page_style(lines)
+    prev = None
     for ln in lines:
         line_heads = []
         segs = segments(ln)
@@ -108,11 +158,17 @@ def find_headings(lines: list[Line], template: Template) -> list[Heading]:
             key = template.match_section(text)
             if not key:
                 break
-            line_heads.append(Heading(key, text, words, ln.page))
+            line_heads.append(Heading(key, text, words, ln.page, name=template.by_key[key]["name"]))
         # a heading owns its whole line (or shares it only with other headings);
         # a lone matching word inside a table header row is not a heading
         if line_heads and len(line_heads) == len(segs):
             found.extend(line_heads)
+        elif generic and _generic_heading(ln, prev, style):
+            text = " ".join(t.text for t in ln.tokens)
+            found.append(Heading("other:" + slug(text), text, list(ln.tokens), ln.page,
+                                 name=" ".join(w.capitalize() if w.isupper() else w for w in text.split()),
+                                 generic=True))
+        prev = ln
     return found
 
 
@@ -164,8 +220,7 @@ def build_regions(pages: list[PageData], lines_by_page: dict[int, list[Line]], t
                 if h2.top > h.top and not _same_row(h, h2) and a0 < x1 and a1 > x0:
                     bottom = min(bottom, h2.top - 1)
             counter += 1
-            sec = template.by_key[h.key]
-            r = Region(f"SEC_{counter:03d}", h.key, sec["name"], h.text, pd.number, x0, h.top - 1, x1, bottom,
+            r = Region(f"SEC_{counter:03d}", h.key, h.name, h.text, pd.number, x0, h.top - 1, x1, bottom,
                        bbox_of(h.tokens))
             regions.append(r)
         if spans:

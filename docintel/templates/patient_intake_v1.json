@@ -256,6 +256,8 @@
     "HAS_FAMILY_HISTORY": [["Patient"], ["FamilyMember"]],
     "PROVIDES_CONSENT": [["Patient"], ["Consent"]],
     "AUTHORIZES_RELEASE_TO": [["Patient"], ["AuthorizedPerson"]],
-    "SIGNS": [["Patient"], ["Agreement"]]
+    "SIGNS": [["Patient"], ["Agreement"]],
+    "CONTAINS": [["Section"], ["Field", "TableRow", "Question", "Signature"]],
+    "DATED": [["Signature"], ["Field"]]
   }
 }

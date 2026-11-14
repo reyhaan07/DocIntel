@@ -1,0 +1,308 @@
+{
+ "document": "intake_A_fillable_okafor.pdf",
+ "document_type": "patient intake",
+ "values": {
+  "Agreement[Consent for Treatment].date": "2026-11-04",
+  "Agreement[Consent for Treatment].printed_name": "Chidi Okafor",
+  "Agreement[Consent for Treatment].signature": "/s/ Chidi Okafor",
+  "Agreement[Consent for Treatment].title": "Consent for Treatment",
+  "Agreement[Financial Responsibility Agreement].date": "2026-11-04",
+  "Agreement[Financial Responsibility Agreement].printed_name": "Chidi Okafor",
+  "Agreement[Financial Responsibility Agreement].signature": "/s/ Chidi Okafor",
+  "Agreement[Financial Responsibility Agreement].title": "Financial Responsibility Agreement",
+  "Agreement[Privacy Practices Acknowledgment].date": "2026-11-04",
+  "Agreement[Privacy Practices Acknowledgment].printed_name": "Chidi Okafor",
+  "Agreement[Privacy Practices Acknowledgment].signature": "/s/ Chidi Okafor",
+  "Agreement[Privacy Practices Acknowledgment].title": "Privacy Practices Acknowledgment",
+  "Allergy[Latex].allergen": "Latex",
+  "Allergy[Latex].reaction": "Itching",
+  "Allergy[Latex].severity": "Moderate",
+  "Allergy[Sulfa drugs].allergen": "Sulfa drugs",
+  "Allergy[Sulfa drugs].reaction": "Rash",
+  "Allergy[Sulfa drugs].severity": "Mild",
+  "AuthorizedPerson[Amara Okafor].full_name": "Amara Okafor",
+  "AuthorizedPerson[Amara Okafor].phone": "(312) 555-0119",
+  "AuthorizedPerson[Amara Okafor].relationship": "wife",
+  "Condition[Asthma].name": "Asthma",
+  "Condition[High cholesterol].name": "High cholesterol",
+  "Condition[Hypertension @ Family Medical History].name": "Hypertension",
+  "Condition[Hypertension @ Medical History].name": "Hypertension",
+  "Condition[Stroke].name": "Stroke",
+  "Condition[arthritis].name": "arthritis",
+  "Consent[email].decision": "yes",
+  "Consent[email].topic": "email",
+  "Consent[release of health information].decision": "yes",
+  "Consent[release of health information].topic": "release of health information",
+  "Consent[text message].decision": "yes",
+  "Consent[text message].topic": "text message",
+  "Consent[voicemail].decision": "yes",
+  "Consent[voicemail].topic": "voicemail",
+  "Doctor[Dr. Helen Park].name": "Dr. Helen Park",
+  "Doctor[Dr. Samuel Reyes].name": "Dr. Samuel Reyes",
+  "EmergencyContact.full_name": "Ngozi Okafor",
+  "EmergencyContact.phone": "(312) 555-0175",
+  "EmergencyContact.relationship": "sister",
+  "FamilyMember[Father].age": "68",
+  "FamilyMember[Father].conditions": [
+   "Stroke"
+  ],
+  "FamilyMember[Father].living_status": "deceased",
+  "FamilyMember[Father].relation": "father",
+  "FamilyMember[Mother].age": "72",
+  "FamilyMember[Mother].conditions": [
+   "Hypertension",
+   "arthritis"
+  ],
+  "FamilyMember[Mother].living_status": "living",
+  "FamilyMember[Mother].relation": "mother",
+  "Hospital[Lagos University Teaching Hospital].name": "Lagos University Teaching Hospital",
+  "Hospital[Northwestern Memorial Hospital].name": "Northwestern Memorial Hospital",
+  "InsuranceCompany[Great Lakes Health Plan].name": "Great Lakes Health Plan",
+  "InsuranceCompany[Prairie Mutual].name": "Prairie Mutual",
+  "InsurancePolicy[Great Lakes Health Plan].group_number": "GL-7710",
+  "InsurancePolicy[Great Lakes Health Plan].insurance_company": "Great Lakes Health Plan",
+  "InsurancePolicy[Great Lakes Health Plan].insurance_phone": "(800) 555-0144",
+  "InsurancePolicy[Great Lakes Health Plan].member_id": "GLH-5520184",
+  "InsurancePolicy[Great Lakes Health Plan].policy_holder_dob": "1979-03-02",
+  "InsurancePolicy[Great Lakes Health Plan].policy_holder_name": "Chidi Okafor",
+  "InsurancePolicy[Great Lakes Health Plan].policy_holder_relationship": "self",
+  "InsurancePolicy[Great Lakes Health Plan].policy_type": "primary",
+  "InsurancePolicy[Prairie Mutual].group_number": "PM-118",
+  "InsurancePolicy[Prairie Mutual].insurance_company": "Prairie Mutual",
+  "InsurancePolicy[Prairie Mutual].insurance_phone": "(800) 555-0177",
+  "InsurancePolicy[Prairie Mutual].member_id": "PRM-302911",
+  "InsurancePolicy[Prairie Mutual].policy_holder_dob": "1981-09-15",
+  "InsurancePolicy[Prairie Mutual].policy_holder_name": "Amara Okafor",
+  "InsurancePolicy[Prairie Mutual].policy_holder_relationship": "spouse",
+  "InsurancePolicy[Prairie Mutual].policy_type": "secondary",
+  "Medication[Albuterol inhaler].dosage": "2 puffs",
+  "Medication[Albuterol inhaler].frequency": "As needed",
+  "Medication[Albuterol inhaler].name": "Albuterol inhaler",
+  "Medication[Albuterol inhaler].prescribing_doctor": "Dr. Samuel Reyes",
+  "Medication[Amlodipine].dosage": "5 mg",
+  "Medication[Amlodipine].frequency": "Once daily",
+  "Medication[Amlodipine].name": "Amlodipine",
+  "Medication[Amlodipine].prescribing_doctor": "Dr. Helen Park",
+  "Medication[Atorvastatin].dosage": "20 mg",
+  "Medication[Atorvastatin].frequency": "Once daily",
+  "Medication[Atorvastatin].name": "Atorvastatin",
+  "Medication[Atorvastatin].prescribing_doctor": "Dr. Helen Park",
+  "Medication[Omeprazole].dosage": "20 mg",
+  "Medication[Omeprazole].frequency": "Before breakfast",
+  "Medication[Omeprazole].name": "Omeprazole",
+  "Medication[Omeprazole].prescribing_doctor": "Dr. Samuel Reyes",
+  "Patient.address": "1180 Lakeview Avenue",
+  "Patient.city": "Chicago",
+  "Patient.date_of_birth": "1979-03-02",
+  "Patient.email": "chidi.okafor@example.com",
+  "Patient.first_name": "Chidi",
+  "Patient.full_name": "Chidi Okafor",
+  "Patient.last_name": "Okafor",
+  "Patient.marital_status": "married",
+  "Patient.phone": "(312) 555-0118",
+  "Patient.sex": "male",
+  "Patient.state": "IL",
+  "Patient.zip": "60614",
+  "Spouse.date_of_birth": "1981-09-15",
+  "Spouse.full_name": "Amara Okafor",
+  "Spouse.phone": "(312) 555-0119",
+  "Surgery[Knee arthroscopy].facility": "Northwestern Memorial Hospital",
+  "Surgery[Knee arthroscopy].procedure": "Knee arthroscopy",
+  "Surgery[Knee arthroscopy].year": "2015",
+  "Surgery[Tonsillectomy].facility": "Lagos University Teaching Hospital",
+  "Surgery[Tonsillectomy].procedure": "Tonsillectomy",
+  "Surgery[Tonsillectomy].year": "1988"
+ },
+ "relationships": [
+  [
+   "FamilyMember[Father]",
+   "HAS_CONDITION",
+   "Condition[Stroke]"
+  ],
+  [
+   "FamilyMember[Mother]",
+   "HAS_CONDITION",
+   "Condition[Hypertension @ Family Medical History]"
+  ],
+  [
+   "FamilyMember[Mother]",
+   "HAS_CONDITION",
+   "Condition[arthritis]"
+  ],
+  [
+   "InsurancePolicy[Great Lakes Health Plan]",
+   "HELD_BY",
+   "Patient"
+  ],
+  [
+   "InsurancePolicy[Great Lakes Health Plan]",
+   "ISSUED_BY",
+   "InsuranceCompany[Great Lakes Health Plan]"
+  ],
+  [
+   "InsurancePolicy[Prairie Mutual]",
+   "HELD_BY",
+   "Spouse"
+  ],
+  [
+   "InsurancePolicy[Prairie Mutual]",
+   "ISSUED_BY",
+   "InsuranceCompany[Prairie Mutual]"
+  ],
+  [
+   "Medication[Albuterol inhaler]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Samuel Reyes]"
+  ],
+  [
+   "Medication[Amlodipine]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Helen Park]"
+  ],
+  [
+   "Medication[Atorvastatin]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Helen Park]"
+  ],
+  [
+   "Medication[Omeprazole]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Samuel Reyes]"
+  ],
+  [
+   "Patient",
+   "AUTHORIZES_RELEASE_TO",
+   "AuthorizedPerson[Amara Okafor]"
+  ],
+  [
+   "Patient",
+   "HAD_SURGERY",
+   "Surgery[Knee arthroscopy]"
+  ],
+  [
+   "Patient",
+   "HAD_SURGERY",
+   "Surgery[Tonsillectomy]"
+  ],
+  [
+   "Patient",
+   "HAS_ALLERGY",
+   "Allergy[Latex]"
+  ],
+  [
+   "Patient",
+   "HAS_ALLERGY",
+   "Allergy[Sulfa drugs]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[Asthma]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[High cholesterol]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[Hypertension @ Medical History]"
+  ],
+  [
+   "Patient",
+   "HAS_EMERGENCY_CONTACT",
+   "EmergencyContact"
+  ],
+  [
+   "Patient",
+   "HAS_FAMILY_HISTORY",
+   "FamilyMember[Father]"
+  ],
+  [
+   "Patient",
+   "HAS_FAMILY_HISTORY",
+   "FamilyMember[Mother]"
+  ],
+  [
+   "Patient",
+   "HAS_INSURANCE",
+   "InsurancePolicy[Great Lakes Health Plan]"
+  ],
+  [
+   "Patient",
+   "HAS_INSURANCE",
+   "InsurancePolicy[Prairie Mutual]"
+  ],
+  [
+   "Patient",
+   "HAS_SPOUSE",
+   "Spouse"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[email]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[release of health information]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[text message]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[voicemail]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Consent for Treatment]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Financial Responsibility Agreement]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Privacy Practices Acknowledgment]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Albuterol inhaler]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Amlodipine]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Atorvastatin]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Omeprazole]"
+  ],
+  [
+   "Surgery[Knee arthroscopy]",
+   "PERFORMED_AT",
+   "Hospital[Northwestern Memorial Hospital]"
+  ],
+  [
+   "Surgery[Tonsillectomy]",
+   "PERFORMED_AT",
+   "Hospital[Lagos University Teaching Hospital]"
+  ]
+ ]
+}

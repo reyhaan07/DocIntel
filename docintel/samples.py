@@ -352,7 +352,7 @@ LINDQVIST = {
 
 
 # --------------------------------------------------------------------------- other clinic layout
-def make_riverside(path, title="Riverside New Patient Packet"):
+def make_riverside(path, title="Riverside New Patient Packet", extras: bool = False):
     """A different clinic's packet: its own headings, side-by-side insurance,
     drug/prescribed-by/dose/how-often medication table, printed [X] boxes."""
     c = canvas.Canvas(str(path), pagesize=letter)
@@ -378,6 +378,8 @@ def make_riverside(path, title="Riverside New Patient Packet"):
     kv("Patient Name", "Rivera, Maria L.", X, 120); kv("DOB", "7/14/1985", X + 300, 120); kv("Gender", "Female", X + 410, 120)
     kv("Street Address", "42 Elm Street", X, 136); kv("Marital Status", "Married", X + 300, 136)
     kv("City", "Springfield", X, 152); kv("State", "IL", X + 92, 152); kv("Zip", "62704", X + 142, 152)
+    if extras:  # a field the template does not know
+        kv("Preferred Language", "Spanish", X + 300, 152)
     kv("Mobile Phone", "217.555.0143", X, 168); kv("E-mail", "maria.rivera@example.com", X + 300, 168)
 
     head("SPOUSE / PARTNER", 186)
@@ -479,6 +481,10 @@ def make_riverside(path, title="Riverside New Patient Packet"):
     p.ink(X + 60, 554, 100, 18, seed=11)
     kv("Print Name", "Ana Lopez", X + 250, 568)
     kv("Date", "11/03/2026", X + 400, 568)
+    if extras:  # a whole section the template does not know
+        head("PREFERRED PHARMACY", 600)
+        kv("Pharmacy Name", "Elm Street Pharmacy", X, 626)
+        kv("Phone", "217-555-0110", X + 300, 626)
     p.text("Riverside registration packet", RR - 112, 772, size=7.5, color=GRAY)
     c.showPage()
     c.save()
@@ -520,6 +526,102 @@ def make_scanned(src, path, dpi: int = 110, seed: int = 5, angles: list[float] |
     c.save()
 
 
+# --------------------------------------------------------------------------- documents of other kinds
+def _simple_doc(path, title: str, draw):
+    c = canvas.Canvas(str(path), pagesize=letter)
+    c.setTitle(title)
+    c.setAuthor("docintel samples")
+    p = _Pen(c, "flattened", {})
+    draw(p)
+    c.showPage()
+    c.save()
+
+
+def make_lab_report(path):
+    """A laboratory report: not an intake form, read with the template-free structure."""
+    GREEN = HexColor("#1d5c46")
+    X = 54.0
+
+    def kv(p, label, value, x, baseline):
+        end = p.text(f"{label}:", x, baseline, size=9.5)
+        p.text(value, end + 4, baseline, size=9.5)
+
+    def draw(p):
+        p.text("CITY LAB SERVICES", X, 60, size=16, bold=True, color=GREEN)
+        p.text("Clinical Laboratory Report  -  1200 Grand Avenue, Springfield", X, 74, size=8.5, color=GRAY)
+        p.heading("PATIENT", 96, X, 558, color=GREEN, size=11)
+        kv(p, "Name", "Harper, Lena J.", X, 124); kv(p, "DOB", "02/11/1972", X + 230, 124); kv(p, "Sex", "F", X + 400, 124)
+        kv(p, "MRN", "0042-8817", X, 140); kv(p, "Phone", "(217) 555-0148", X + 230, 140)
+        p.heading("ORDER", 162, X, 558, color=GREEN, size=11)
+        kv(p, "Ordering Physician", "Dr. Omar Haddad", X, 190); kv(p, "Specimen", "Serum", X + 300, 190)
+        kv(p, "Collected", "11/02/2026", X, 206); kv(p, "Received", "11/02/2026", X + 300, 206)
+        p.heading("RESULTS", 228, X, 558, color=GREEN, size=11)
+        cols = [X, X + 160, X + 230, X + 300, X + 420]
+        for x, h in zip(cols, ["Test", "Result", "Units", "Reference Range", "Flag"]):
+            p.text(h, x, 256, size=9.5, bold=True)
+        rows = [("Glucose", "112", "mg/dL", "70-99", "H"), ("Hemoglobin A1c", "6.1", "%", "4.0-5.6", "H"),
+                ("Total Cholesterol", "182", "mg/dL", "< 200", ""), ("LDL Cholesterol", "104", "mg/dL", "< 100", "H"),
+                ("HDL Cholesterol", "48", "mg/dL", "> 40", ""), ("Creatinine", "0.9", "mg/dL", "0.6-1.2", "")]
+        for i, row in enumerate(rows):
+            for x, v in zip(cols, row):
+                if v:
+                    p.text(v, x, 274 + i * 17, size=9.5)
+        p.heading("COMMENTS", 392, X, 558, color=GREEN, size=11)
+        p.text("Glucose and HbA1c are above the reference range. Repeat fasting glucose is recommended.", X, 418, size=9)
+        end = p.text("Was the patient fasting?", X, 440, size=9.5)
+        p.text("[X] Yes     [ ] No", end + 12, 440, size=9.5)
+        p.heading("VERIFICATION", 462, X, 558, color=GREEN, size=11)
+        p.text("Reviewed by:", X, 490, size=9.5)
+        p.ink(X + 72, 476, 110, 18, seed=21)
+        kv(p, "Date", "11/03/2026", X + 300, 490)
+        p.text("City Lab Services - results are for the ordering clinician", 558 - 210, 772, size=7.5, color=GRAY)
+
+    _simple_doc(path, "Laboratory report", draw)
+
+
+def make_invoice(path):
+    """A supplier invoice: a document outside healthcare intake entirely."""
+    NAVY = HexColor("#22304f")
+    X = 54.0
+
+    def kv(p, label, value, x, baseline, bold=False):
+        end = p.text(f"{label}:", x, baseline, size=9.5)
+        p.text(value, end + 4, baseline, size=9.5, bold=bold)
+
+    def draw(p):
+        p.text("NORTHWIND OFFICE SUPPLY", X, 60, size=16, bold=True, color=NAVY)
+        p.text("44 Harbor Street, Portland, OR 97204  -  billing@northwind.example", X, 74, size=8.5, color=GRAY)
+        p.heading("INVOICE", 96, X, 558, color=NAVY, size=11)
+        kv(p, "Invoice No", "INV-20817", X, 124); kv(p, "Invoice Date", "10/30/2026", X + 280, 124)
+        kv(p, "PO Number", "4471", X, 140); kv(p, "Due Date", "11/29/2026", X + 280, 140)
+        p.heading("BILL TO", 162, X, 558, color=NAVY, size=11)
+        kv(p, "Company", "Riverside Family Clinic", X, 190); kv(p, "Attention", "Accounts Payable", X + 280, 190)
+        kv(p, "Address", "18 River Road, Springfield, IL 62704", X, 206)
+        p.heading("ITEMS", 228, X, 558, color=NAVY, size=11)
+        cols = [X, X + 70, X + 300, X + 350, X + 430]
+        for x, h in zip(cols, ["Item", "Description", "Qty", "Unit Price", "Amount"]):
+            p.text(h, x, 256, size=9.5, bold=True)
+        rows = [("P-1001", "Exam table paper, 21 in", "12", "$18.50", "$222.00"),
+                ("P-2040", "Nitrile gloves, medium (box)", "20", "$9.75", "$195.00"),
+                ("P-3302", "Printer toner, black", "4", "$89.00", "$356.00"),
+                ("P-4410", "Clipboards, letter size", "30", "$15.60", "$468.00")]
+        for i, row in enumerate(rows):
+            for x, v in zip(cols, row):
+                p.text(v, x, 274 + i * 17, size=9.5)
+        p.heading("TOTALS", 356, X, 558, color=NAVY, size=11)
+        kv(p, "Subtotal", "$1,241.00", X + 300, 384)
+        kv(p, "Tax", "$99.28", X + 300, 400)
+        kv(p, "Total Due", "$1,340.28", X + 300, 416, bold=True)
+        p.heading("PAYMENT", 438, X, 558, color=NAVY, size=11)
+        end = p.text("Paid by check?", X, 466, size=9.5)
+        p.text("[ ] Yes     [X] No", end + 12, 466, size=9.5)
+        p.text("Authorized Signature:", X, 490, size=9.5)
+        p.ink(X + 112, 476, 100, 18, seed=33)
+        kv(p, "Date", "10/30/2026", X + 300, 490)
+
+    _simple_doc(path, "Invoice INV-20817", draw)
+
+
 # --------------------------------------------------------------------------- entry point
 def reference_form_path() -> Path:
     return Path(__file__).parent / "templates" / "patient_intake_v1.pdf"
@@ -543,7 +645,11 @@ def generate_all(input_dir: str | Path = "samples/input", upload_dir: str | Path
     make_scanned(cc, d)
     e = input_dir / "intake_E_scanned_lindqvist.pdf"
     make_scanned(b, e, seed=9)
-    out += [a, b, cc, d, e]
+    lab = input_dir / "lab_report_harper.pdf"
+    make_lab_report(lab)
+    inv = input_dir / "invoice_northwind.pdf"
+    make_invoice(inv)
+    out += [a, b, cc, d, e, lab, inv]
     if upload_dir:
         upload_dir = Path(upload_dir)
         upload_dir.mkdir(parents=True, exist_ok=True)

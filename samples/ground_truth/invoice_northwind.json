@@ -1,0 +1,136 @@
+{
+ "document": "invoice_northwind.pdf",
+ "document_type": "unknown",
+ "values": {
+  "Field[Address].value": "18 River Road, Springfield, IL 62704",
+  "Field[Attention].value": "Accounts Payable",
+  "Field[Company].value": "Riverside Family Clinic",
+  "Field[Date].value": "2026-10-30",
+  "Field[Due Date].value": "2026-11-29",
+  "Field[Invoice Date].value": "2026-10-30",
+  "Field[Invoice No].value": "INV-20817",
+  "Field[PO Number].value": "4471",
+  "Field[Subtotal].value": "$1,241.00",
+  "Field[Tax].value": "$99.28",
+  "Field[Total Due].value": "$1,340.28",
+  "Question[Paid by check].answer": "no",
+  "Section[Bill To].title": "Bill To",
+  "Section[Invoice].title": "Invoice",
+  "Section[Items].title": "Items",
+  "Section[Payment].title": "Payment",
+  "Section[Totals].title": "Totals",
+  "Signature[Authorized Signature].signature": "ink signature",
+  "TableRow[P-1001].amount": "$222.00",
+  "TableRow[P-1001].description": "Exam table paper, 21 in",
+  "TableRow[P-1001].item": "P-1001",
+  "TableRow[P-1001].qty": "12",
+  "TableRow[P-1001].unit_price": "$18.50",
+  "TableRow[P-2040].amount": "$195.00",
+  "TableRow[P-2040].description": "Nitrile gloves, medium (box)",
+  "TableRow[P-2040].item": "P-2040",
+  "TableRow[P-2040].qty": "20",
+  "TableRow[P-2040].unit_price": "$9.75",
+  "TableRow[P-3302].amount": "$356.00",
+  "TableRow[P-3302].description": "Printer toner, black",
+  "TableRow[P-3302].item": "P-3302",
+  "TableRow[P-3302].qty": "4",
+  "TableRow[P-3302].unit_price": "$89.00",
+  "TableRow[P-4410].amount": "$468.00",
+  "TableRow[P-4410].description": "Clipboards, letter size",
+  "TableRow[P-4410].item": "P-4410",
+  "TableRow[P-4410].qty": "30",
+  "TableRow[P-4410].unit_price": "$15.60"
+ },
+ "relationships": [
+  [
+   "Section[Bill To]",
+   "CONTAINS",
+   "Field[Address]"
+  ],
+  [
+   "Section[Bill To]",
+   "CONTAINS",
+   "Field[Attention]"
+  ],
+  [
+   "Section[Bill To]",
+   "CONTAINS",
+   "Field[Company]"
+  ],
+  [
+   "Section[Invoice]",
+   "CONTAINS",
+   "Field[Due Date]"
+  ],
+  [
+   "Section[Invoice]",
+   "CONTAINS",
+   "Field[Invoice Date]"
+  ],
+  [
+   "Section[Invoice]",
+   "CONTAINS",
+   "Field[Invoice No]"
+  ],
+  [
+   "Section[Invoice]",
+   "CONTAINS",
+   "Field[PO Number]"
+  ],
+  [
+   "Section[Items]",
+   "CONTAINS",
+   "TableRow[P-1001]"
+  ],
+  [
+   "Section[Items]",
+   "CONTAINS",
+   "TableRow[P-2040]"
+  ],
+  [
+   "Section[Items]",
+   "CONTAINS",
+   "TableRow[P-3302]"
+  ],
+  [
+   "Section[Items]",
+   "CONTAINS",
+   "TableRow[P-4410]"
+  ],
+  [
+   "Section[Payment]",
+   "CONTAINS",
+   "Field[Date]"
+  ],
+  [
+   "Section[Payment]",
+   "CONTAINS",
+   "Question[Paid by check]"
+  ],
+  [
+   "Section[Payment]",
+   "CONTAINS",
+   "Signature[Authorized Signature]"
+  ],
+  [
+   "Section[Totals]",
+   "CONTAINS",
+   "Field[Subtotal]"
+  ],
+  [
+   "Section[Totals]",
+   "CONTAINS",
+   "Field[Tax]"
+  ],
+  [
+   "Section[Totals]",
+   "CONTAINS",
+   "Field[Total Due]"
+  ],
+  [
+   "Signature[Authorized Signature]",
+   "DATED",
+   "Field[Date]"
+  ]
+ ]
+}

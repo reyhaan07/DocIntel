@@ -1,0 +1,147 @@
+{
+ "document": "lab_report_harper.pdf",
+ "document_type": "unknown",
+ "values": {
+  "Field[Collected].value": "2026-11-02",
+  "Field[DOB].value": "1972-02-11",
+  "Field[Date].value": "2026-11-03",
+  "Field[MRN].value": "0042-8817",
+  "Field[Name].value": "Harper, Lena J.",
+  "Field[Ordering Physician].value": "Dr. Omar Haddad",
+  "Field[Phone].value": "(217) 555-0148",
+  "Field[Received].value": "2026-11-02",
+  "Field[Sex].value": "F",
+  "Field[Specimen].value": "Serum",
+  "Question[Was the patient fasting].answer": "yes",
+  "Section[Comments].title": "Comments",
+  "Section[Order].title": "Order",
+  "Section[Patient].title": "Patient",
+  "Section[Results].title": "Results",
+  "Section[Verification].title": "Verification",
+  "Signature[Reviewed by].signature": "ink signature",
+  "TableRow[Creatinine].reference_range": "0.6-1.2",
+  "TableRow[Creatinine].result": "0.9",
+  "TableRow[Creatinine].test": "Creatinine",
+  "TableRow[Creatinine].units": "mg/dL",
+  "TableRow[Glucose].flag": "H",
+  "TableRow[Glucose].reference_range": "70-99",
+  "TableRow[Glucose].result": "112",
+  "TableRow[Glucose].test": "Glucose",
+  "TableRow[Glucose].units": "mg/dL",
+  "TableRow[HDL Cholesterol].reference_range": "> 40",
+  "TableRow[HDL Cholesterol].result": "48",
+  "TableRow[HDL Cholesterol].test": "HDL Cholesterol",
+  "TableRow[HDL Cholesterol].units": "mg/dL",
+  "TableRow[Hemoglobin A1c].flag": "H",
+  "TableRow[Hemoglobin A1c].reference_range": "4.0-5.6",
+  "TableRow[Hemoglobin A1c].result": "6.1",
+  "TableRow[Hemoglobin A1c].test": "Hemoglobin A1c",
+  "TableRow[Hemoglobin A1c].units": "%",
+  "TableRow[LDL Cholesterol].flag": "H",
+  "TableRow[LDL Cholesterol].reference_range": "< 100",
+  "TableRow[LDL Cholesterol].result": "104",
+  "TableRow[LDL Cholesterol].test": "LDL Cholesterol",
+  "TableRow[LDL Cholesterol].units": "mg/dL",
+  "TableRow[Total Cholesterol].reference_range": "< 200",
+  "TableRow[Total Cholesterol].result": "182",
+  "TableRow[Total Cholesterol].test": "Total Cholesterol",
+  "TableRow[Total Cholesterol].units": "mg/dL"
+ },
+ "relationships": [
+  [
+   "Section[Comments]",
+   "CONTAINS",
+   "Question[Was the patient fasting]"
+  ],
+  [
+   "Section[Order]",
+   "CONTAINS",
+   "Field[Collected]"
+  ],
+  [
+   "Section[Order]",
+   "CONTAINS",
+   "Field[Ordering Physician]"
+  ],
+  [
+   "Section[Order]",
+   "CONTAINS",
+   "Field[Received]"
+  ],
+  [
+   "Section[Order]",
+   "CONTAINS",
+   "Field[Specimen]"
+  ],
+  [
+   "Section[Patient]",
+   "CONTAINS",
+   "Field[DOB]"
+  ],
+  [
+   "Section[Patient]",
+   "CONTAINS",
+   "Field[MRN]"
+  ],
+  [
+   "Section[Patient]",
+   "CONTAINS",
+   "Field[Name]"
+  ],
+  [
+   "Section[Patient]",
+   "CONTAINS",
+   "Field[Phone]"
+  ],
+  [
+   "Section[Patient]",
+   "CONTAINS",
+   "Field[Sex]"
+  ],
+  [
+   "Section[Results]",
+   "CONTAINS",
+   "TableRow[Creatinine]"
+  ],
+  [
+   "Section[Results]",
+   "CONTAINS",
+   "TableRow[Glucose]"
+  ],
+  [
+   "Section[Results]",
+   "CONTAINS",
+   "TableRow[HDL Cholesterol]"
+  ],
+  [
+   "Section[Results]",
+   "CONTAINS",
+   "TableRow[Hemoglobin A1c]"
+  ],
+  [
+   "Section[Results]",
+   "CONTAINS",
+   "TableRow[LDL Cholesterol]"
+  ],
+  [
+   "Section[Results]",
+   "CONTAINS",
+   "TableRow[Total Cholesterol]"
+  ],
+  [
+   "Section[Verification]",
+   "CONTAINS",
+   "Field[Date]"
+  ],
+  [
+   "Section[Verification]",
+   "CONTAINS",
+   "Signature[Reviewed by]"
+  ],
+  [
+   "Signature[Reviewed by]",
+   "DATED",
+   "Field[Date]"
+  ]
+ ]
+}

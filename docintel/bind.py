@@ -71,9 +71,12 @@ def _parse_kv_line(tokens: list[Token], table) -> list[tuple[dict | None, list[T
                 while (start - 1 >= floor and i - start < 4 and tokens[start - 1].kind == "word"
                        and not tokens[start - 1].text.endswith(":") and tokens[start].x0 - tokens[start - 1].x1 < 5):
                     start -= 1
-                # never steal the last word of a value that is directly attached
+                # words reaching back to the previous label are the value of that label,
+                # unless a wide empty gap separates them from it (an empty field)
                 if labels and start == floor:
-                    start = i
+                    prev_end = tokens[floor - 1].x1 if floor > 0 else None
+                    if prev_end is None or tokens[floor].x0 - prev_end < 12:
+                        start = i
                 labels.append((start, i + 1, None))
         i += 1
     out = []
@@ -159,6 +162,9 @@ class Binder:
                                    "page": t.page, "rect": t.bbox, "kind": "checkbox" if t.kind == "checkbox" else "text"})
 
     # ------------------------------------------------------------------ run
+    def matched_sections(self) -> set[str]:
+        return {r.key for r in self.regions if not r.key.startswith("other:")}
+
     def run(self) -> "Binder":
         handlers = {"record": self.bind_record, "table": self.bind_table, "checklist": self.bind_checklist,
                     "family": self.bind_family, "yes_no": self.bind_yes_no, "release": self.bind_release,

@@ -1,0 +1,204 @@
+{
+ "document": "intake_B_flattened_lindqvist.pdf",
+ "document_type": "patient intake",
+ "values": {
+  "Agreement[Consent for Treatment].date": "2026-10-28",
+  "Agreement[Consent for Treatment].printed_name": "Erik Lindqvist",
+  "Agreement[Consent for Treatment].signature": "ink signature",
+  "Agreement[Consent for Treatment].title": "Consent for Treatment",
+  "Agreement[Financial Responsibility Agreement].date": "2026-10-28",
+  "Agreement[Financial Responsibility Agreement].printed_name": "Karin Lindqvist",
+  "Agreement[Financial Responsibility Agreement].signature": "ink signature",
+  "Agreement[Financial Responsibility Agreement].title": "Financial Responsibility Agreement",
+  "Agreement[Privacy Practices Acknowledgment].date": "2026-10-28",
+  "Agreement[Privacy Practices Acknowledgment].printed_name": "Erik Lindqvist",
+  "Agreement[Privacy Practices Acknowledgment].signature": "ink signature",
+  "Agreement[Privacy Practices Acknowledgment].title": "Privacy Practices Acknowledgment",
+  "Allergy[Peanuts].allergen": "Peanuts",
+  "Allergy[Peanuts].reaction": "Anaphylaxis",
+  "Allergy[Peanuts].severity": "Severe",
+  "Condition[Asthma].name": "Asthma",
+  "Condition[High blood pressure].name": "High blood pressure",
+  "Condition[Thyroid disease].name": "Thyroid disease",
+  "Condition[Thyroid disorder].name": "Thyroid disorder",
+  "Consent[email].decision": "yes",
+  "Consent[email].topic": "email",
+  "Consent[release of health information].decision": "no",
+  "Consent[release of health information].topic": "release of health information",
+  "Consent[text message].decision": "no",
+  "Consent[text message].topic": "text message",
+  "Consent[voicemail].decision": "yes",
+  "Consent[voicemail].topic": "voicemail",
+  "Doctor[Dr. Maya Singh].name": "Dr. Maya Singh",
+  "EmergencyContact.full_name": "Karin Lindqvist",
+  "EmergencyContact.phone": "(608) 555-0161",
+  "EmergencyContact.relationship": "mother",
+  "FamilyMember[Father].age": "63",
+  "FamilyMember[Father].conditions": [
+   "High blood pressure"
+  ],
+  "FamilyMember[Father].living_status": "living",
+  "FamilyMember[Father].relation": "father",
+  "FamilyMember[Mother].age": "61",
+  "FamilyMember[Mother].conditions": [
+   "Thyroid disease"
+  ],
+  "FamilyMember[Mother].living_status": "living",
+  "FamilyMember[Mother].relation": "mother",
+  "Hospital[St. Luke's Hospital].name": "St. Luke's Hospital",
+  "InsuranceCompany[Badger State Health].name": "Badger State Health",
+  "InsurancePolicy[Badger State Health].group_number": "BS-404",
+  "InsurancePolicy[Badger State Health].insurance_company": "Badger State Health",
+  "InsurancePolicy[Badger State Health].insurance_phone": "(800) 555-0190",
+  "InsurancePolicy[Badger State Health].member_id": "BSH-889012",
+  "InsurancePolicy[Badger State Health].policy_holder_dob": "1990-11-21",
+  "InsurancePolicy[Badger State Health].policy_holder_name": "Erik Lindqvist",
+  "InsurancePolicy[Badger State Health].policy_holder_relationship": "self",
+  "InsurancePolicy[Badger State Health].policy_type": "primary",
+  "Medication[Cetirizine].dosage": "10 mg",
+  "Medication[Cetirizine].frequency": "As needed",
+  "Medication[Cetirizine].name": "Cetirizine",
+  "Medication[Cetirizine].prescribing_doctor": "Dr. Maya Singh",
+  "Medication[Levothyroxine].dosage": "75 mcg",
+  "Medication[Levothyroxine].frequency": "Once daily",
+  "Medication[Levothyroxine].name": "Levothyroxine",
+  "Medication[Levothyroxine].prescribing_doctor": "Dr. Maya Singh",
+  "Patient.address": "77 Birch Road",
+  "Patient.city": "Madison",
+  "Patient.date_of_birth": "1990-11-21",
+  "Patient.email": "erik.lindqvist@example.com",
+  "Patient.first_name": "Erik",
+  "Patient.full_name": "Erik Lindqvist",
+  "Patient.last_name": "Lindqvist",
+  "Patient.marital_status": "single",
+  "Patient.phone": "(608) 555-0123",
+  "Patient.sex": "male",
+  "Patient.state": "WI",
+  "Patient.zip": "53703",
+  "Surgery[Appendectomy].facility": "St. Luke's Hospital",
+  "Surgery[Appendectomy].procedure": "Appendectomy",
+  "Surgery[Appendectomy].year": "2008"
+ },
+ "relationships": [
+  [
+   "FamilyMember[Father]",
+   "HAS_CONDITION",
+   "Condition[High blood pressure]"
+  ],
+  [
+   "FamilyMember[Mother]",
+   "HAS_CONDITION",
+   "Condition[Thyroid disease]"
+  ],
+  [
+   "InsurancePolicy[Badger State Health]",
+   "HELD_BY",
+   "Patient"
+  ],
+  [
+   "InsurancePolicy[Badger State Health]",
+   "ISSUED_BY",
+   "InsuranceCompany[Badger State Health]"
+  ],
+  [
+   "Medication[Cetirizine]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Maya Singh]"
+  ],
+  [
+   "Medication[Levothyroxine]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Maya Singh]"
+  ],
+  [
+   "Patient",
+   "HAD_SURGERY",
+   "Surgery[Appendectomy]"
+  ],
+  [
+   "Patient",
+   "HAS_ALLERGY",
+   "Allergy[Peanuts]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[Asthma]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[Thyroid disorder]"
+  ],
+  [
+   "Patient",
+   "HAS_EMERGENCY_CONTACT",
+   "EmergencyContact"
+  ],
+  [
+   "Patient",
+   "HAS_FAMILY_HISTORY",
+   "FamilyMember[Father]"
+  ],
+  [
+   "Patient",
+   "HAS_FAMILY_HISTORY",
+   "FamilyMember[Mother]"
+  ],
+  [
+   "Patient",
+   "HAS_INSURANCE",
+   "InsurancePolicy[Badger State Health]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[email]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[release of health information]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[text message]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[voicemail]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Consent for Treatment]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Financial Responsibility Agreement]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Privacy Practices Acknowledgment]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Cetirizine]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Levothyroxine]"
+  ],
+  [
+   "Surgery[Appendectomy]",
+   "PERFORMED_AT",
+   "Hospital[St. Luke's Hospital]"
+  ]
+ ]
+}

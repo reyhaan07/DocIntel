@@ -6,7 +6,8 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .bind import TYPE_NAMES, bind
+from .bind import TYPE_NAMES, Binder
+from .generic import GENERIC_TYPE_NAMES, build_generic, extract_structure
 from .ocr import engine_name as ocr_engine_name
 from .ocr import unskew_bbox
 from .read import ocr_available, read_pdf
@@ -14,7 +15,9 @@ from .relate import relate
 from .template import Template, load_template
 from .validate import CHECKS, review_queue, validate
 
-SCHEMA_VERSION = "1.0"
+SCHEMA_VERSION = "1.1"
+MIN_TEMPLATE_SECTIONS = 3  # distinct template sections a document must show before the template applies
+TYPE_LABELS = {**TYPE_NAMES, **GENERIC_TYPE_NAMES}
 
 
 def sha256_file(path: str | Path) -> str:
@@ -33,6 +36,12 @@ def _extraction_method(pages) -> str:
     if any(p.has_text for p in pages):
         return "layout"
     return "none"
+
+
+def _title(binder) -> str | None:
+    """The document's own title: the first heading on the first page."""
+    first = sorted((r for r in binder.regions if r.page == 1 and r.heading and not r.continued), key=lambda r: r.top)
+    return first[0].name if first else None
 
 
 def _unskew(doc: dict, pages) -> None:
@@ -68,9 +77,20 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
     path = Path(path)
     template = template or load_template()
     pages = read_pdf(path, ocr=ocr)
-    binder = bind(pages, template)
-    rels = relate(binder, template.review_threshold)
-    validation = validate(binder, rels, template)
+    binder = Binder(pages, template)
+    # the template's meaning applies only to documents that are recognisably of its type;
+    # every other document is described by its template-free structure alone
+    matched = binder.matched_sections()
+    template_used = len(matched) >= MIN_TEMPLATE_SECTIONS
+    rels = []
+    if template_used:
+        binder.run()
+        rels = relate(binder, template.review_threshold)
+    structure = extract_structure(binder)
+    generic_rels, blanks, coverage = build_generic(binder, structure, template_used, len(rels) + 1)
+    rels += generic_rels
+    validation = validate(binder, rels, template, structure=structure, coverage=coverage,
+                          template_used=template_used)
 
     needs_ocr = [p for p in pages if p.image_only and not p.ocr_used]
     ocr_items = []
@@ -81,6 +101,7 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
         ocr_items.append({"page": p.number, "reason": reason})
     review = review_queue(binder, rels, validation, ocr_items)
     missing = binder.missing if not needs_ocr else [m for m in binder.missing if m["kind"] != "not_provided"]
+    missing = missing + blanks
 
     ents = binder.entities
     if needs_ocr and len(needs_ocr) == len(pages):
@@ -102,8 +123,11 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
         "document": {
             "doc_id": doc_id,
             "filename": filename or path.name,
-            "document_type": template.document_type,
-            "template": template.template_id,
+            "document_type": template.document_type if template_used else "unknown",
+            "title": _title(binder),
+            "template": template.template_id if template_used else None,
+            "template_applied": template_used,
+            "template_sections_found": sorted(matched),
             "page_count": len(pages),
             "pages": [{"page": p.number, "width": round(p.width, 2), "height": round(p.height, 2),
                        "has_text": p.has_text, "form_fields": p.form_fields, "image_only": p.image_only,
@@ -126,11 +150,13 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
             "validation_errors": len(validation["errors"]),
             "fields_filled": 0,
             "fields_withheld": 0,
+            "text_coverage": round(coverage["tokens_explained"] / coverage["tokens_total"], 4) if coverage["tokens_total"] else None,
         },
-        "sections": [r.to_json() for r in binder.regions],
-        "entity_groups": [{"group": g, "type": ents[ids[0]].type, "type_name": TYPE_NAMES.get(ents[ids[0]].type, ents[ids[0]].type),
+        "sections": [r.to_json() for r in binder.regions + structure.pseudo_regions],
+        "coverage": coverage,
+        "entity_groups": [{"group": g, "type": ents[ids[0]].type, "type_name": TYPE_LABELS.get(ents[ids[0]].type, ents[ids[0]].type),
                            "ids": ids} for g, ids in groups.items()],
-        "entities": {eid: dict(e.to_json(), type_name=TYPE_NAMES.get(e.type, e.type)) for eid, e in ents.items()},
+        "entities": {eid: dict(e.to_json(), type_name=TYPE_LABELS.get(e.type, e.type)) for eid, e in ents.items()},
         "relationships": [r.to_json() for r in rels],
         "review_queue": review,
         "missing": missing,
@@ -142,7 +168,7 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
     for e in doc["entities"].values():
         e.pop("_key", None)
     _unskew(doc, pages)
-    if standardized_path:
+    if standardized_path and template_used:
         from .standardize import fill_standardized
 
         std = fill_standardized(doc, standardized_path)

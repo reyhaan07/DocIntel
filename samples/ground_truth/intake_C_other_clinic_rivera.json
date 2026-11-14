@@ -1,0 +1,314 @@
+{
+ "document": "intake_C_other_clinic_rivera.pdf",
+ "document_type": "patient intake",
+ "values": {
+  "Agreement[Consent for Treatment].date": "2026-11-03",
+  "Agreement[Consent for Treatment].printed_name": "Maria Rivera",
+  "Agreement[Consent for Treatment].signature": "ink signature",
+  "Agreement[Consent for Treatment].title": "Consent for Treatment",
+  "Agreement[Financial Responsibility Agreement].date": "2026-11-03",
+  "Agreement[Financial Responsibility Agreement].printed_name": "Ana Lopez",
+  "Agreement[Financial Responsibility Agreement].signature": "ink signature",
+  "Agreement[Financial Responsibility Agreement].title": "Financial Responsibility Agreement",
+  "Agreement[Privacy Practices Acknowledgment].date": "2026-11-03",
+  "Agreement[Privacy Practices Acknowledgment].signature": "/s/ Maria Rivera",
+  "Agreement[Privacy Practices Acknowledgment].title": "Privacy Practices Acknowledgment",
+  "Allergy[Penicillin].allergen": "Penicillin",
+  "Allergy[Penicillin].reaction": "Hives",
+  "Allergy[Penicillin].severity": "Moderate",
+  "Allergy[Shellfish].allergen": "Shellfish",
+  "Allergy[Shellfish].reaction": "Throat swelling",
+  "Allergy[Shellfish].severity": "Severe",
+  "AuthorizedPerson[Daniel Rivera].full_name": "Daniel Rivera",
+  "AuthorizedPerson[Daniel Rivera].phone": "(217) 555-0190",
+  "AuthorizedPerson[Daniel Rivera].relationship": "husband",
+  "Condition[Depression/Anxiety].name": "Depression/Anxiety",
+  "Condition[Diabetes].name": "Diabetes",
+  "Condition[Heart disease].name": "Heart disease",
+  "Condition[Hypertension].name": "Hypertension",
+  "Condition[Migraines].name": "Migraines",
+  "Condition[Type 2 diabetes].name": "Type 2 diabetes",
+  "Condition[hypertension].name": "hypertension",
+  "Condition[stroke].name": "stroke",
+  "Consent[email].decision": "no",
+  "Consent[email].topic": "email",
+  "Consent[release of health information].decision": "yes",
+  "Consent[release of health information].topic": "release of health information",
+  "Consent[text message].decision": null,
+  "Consent[text message].topic": "text message",
+  "Consent[voicemail].decision": "yes",
+  "Consent[voicemail].topic": "voicemail",
+  "Doctor[Dr. Alan Chen].name": "Dr. Alan Chen",
+  "Doctor[Dr. Priya Nair].name": "Dr. Priya Nair",
+  "EmergencyContact.full_name": "Ana Lopez",
+  "EmergencyContact.phone": "(217) 555-0177",
+  "EmergencyContact.relationship": "sister",
+  "FamilyMember[Father].age": "70",
+  "FamilyMember[Father].conditions": [
+   "Heart disease",
+   "stroke"
+  ],
+  "FamilyMember[Father].living_status": "deceased",
+  "FamilyMember[Father].relation": "father",
+  "FamilyMember[Mother].age": "66",
+  "FamilyMember[Mother].conditions": [
+   "Type 2 diabetes",
+   "hypertension"
+  ],
+  "FamilyMember[Mother].living_status": "living",
+  "FamilyMember[Mother].relation": "mother",
+  "Hospital[Springfield General Hospital].name": "Springfield General Hospital",
+  "Hospital[St. Mary's Medical Center].name": "St. Mary's Medical Center",
+  "InsuranceCompany[Blue River Health].name": "Blue River Health",
+  "InsuranceCompany[Lakeside Mutual].name": "Lakeside Mutual",
+  "InsurancePolicy[Blue River Health].group_number": "GRP-2210",
+  "InsurancePolicy[Blue River Health].insurance_company": "Blue River Health",
+  "InsurancePolicy[Blue River Health].insurance_phone": "(800) 555-0101",
+  "InsurancePolicy[Blue River Health].member_id": "BRH-4471920",
+  "InsurancePolicy[Blue River Health].policy_holder_dob": "1985-07-14",
+  "InsurancePolicy[Blue River Health].policy_holder_name": "Maria Rivera",
+  "InsurancePolicy[Blue River Health].policy_holder_relationship": "self",
+  "InsurancePolicy[Blue River Health].policy_type": "primary",
+  "InsurancePolicy[Lakeside Mutual].group_number": "5590-A",
+  "InsurancePolicy[Lakeside Mutual].insurance_company": "Lakeside Mutual",
+  "InsurancePolicy[Lakeside Mutual].insurance_phone": "(800) 555-0199",
+  "InsurancePolicy[Lakeside Mutual].member_id": "LKM-88120",
+  "InsurancePolicy[Lakeside Mutual].policy_holder_dob": "1983-03-22",
+  "InsurancePolicy[Lakeside Mutual].policy_holder_name": "Daniel Rivera",
+  "InsurancePolicy[Lakeside Mutual].policy_holder_relationship": "spouse",
+  "InsurancePolicy[Lakeside Mutual].policy_type": "secondary",
+  "Medication[Lisinopril].dosage": "10 mg",
+  "Medication[Lisinopril].frequency": "Once daily",
+  "Medication[Lisinopril].name": "Lisinopril",
+  "Medication[Lisinopril].prescribing_doctor": "Dr. Alan Chen",
+  "Medication[Metformin].dosage": "500 mg",
+  "Medication[Metformin].frequency": "Twice daily",
+  "Medication[Metformin].name": "Metformin",
+  "Medication[Metformin].prescribing_doctor": "Dr. Alan Chen",
+  "Medication[Sertraline].dosage": "50 mg",
+  "Medication[Sertraline].frequency": "Once daily",
+  "Medication[Sertraline].name": "Sertraline",
+  "Medication[Sertraline].prescribing_doctor": "Dr. Priya Nair",
+  "Medication[Vitamin D3].dosage": "1000 IU",
+  "Medication[Vitamin D3].frequency": "Daily (with breakfast)",
+  "Medication[Vitamin D3].name": "Vitamin D3",
+  "Patient.address": "42 Elm Street",
+  "Patient.city": "Springfield",
+  "Patient.date_of_birth": "1985-07-14",
+  "Patient.email": "maria.rivera@example.com",
+  "Patient.first_name": "Maria",
+  "Patient.full_name": "Rivera, Maria L.",
+  "Patient.last_name": "Rivera",
+  "Patient.marital_status": "married",
+  "Patient.phone": "(217) 555-0143",
+  "Patient.sex": "female",
+  "Patient.state": "IL",
+  "Patient.zip": "62704",
+  "Spouse.date_of_birth": "1983-03-22",
+  "Spouse.full_name": "Daniel Rivera",
+  "Spouse.phone": "(217) 555-0190",
+  "Surgery[Appendectomy].facility": "Springfield General Hospital",
+  "Surgery[Appendectomy].procedure": "Appendectomy",
+  "Surgery[Appendectomy].year": "2009",
+  "Surgery[Cesarean section].facility": "St. Mary's Medical Center",
+  "Surgery[Cesarean section].procedure": "Cesarean section",
+  "Surgery[Cesarean section].year": "2016"
+ },
+ "relationships": [
+  [
+   "FamilyMember[Father]",
+   "HAS_CONDITION",
+   "Condition[Heart disease]"
+  ],
+  [
+   "FamilyMember[Father]",
+   "HAS_CONDITION",
+   "Condition[stroke]"
+  ],
+  [
+   "FamilyMember[Mother]",
+   "HAS_CONDITION",
+   "Condition[Type 2 diabetes]"
+  ],
+  [
+   "FamilyMember[Mother]",
+   "HAS_CONDITION",
+   "Condition[hypertension]"
+  ],
+  [
+   "InsurancePolicy[Blue River Health]",
+   "HELD_BY",
+   "Patient"
+  ],
+  [
+   "InsurancePolicy[Blue River Health]",
+   "ISSUED_BY",
+   "InsuranceCompany[Blue River Health]"
+  ],
+  [
+   "InsurancePolicy[Lakeside Mutual]",
+   "HELD_BY",
+   "Spouse"
+  ],
+  [
+   "InsurancePolicy[Lakeside Mutual]",
+   "ISSUED_BY",
+   "InsuranceCompany[Lakeside Mutual]"
+  ],
+  [
+   "Medication[Lisinopril]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Alan Chen]"
+  ],
+  [
+   "Medication[Metformin]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Alan Chen]"
+  ],
+  [
+   "Medication[Sertraline]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Priya Nair]"
+  ],
+  [
+   "Patient",
+   "AUTHORIZES_RELEASE_TO",
+   "AuthorizedPerson[Daniel Rivera]"
+  ],
+  [
+   "Patient",
+   "HAD_SURGERY",
+   "Surgery[Appendectomy]"
+  ],
+  [
+   "Patient",
+   "HAD_SURGERY",
+   "Surgery[Cesarean section]"
+  ],
+  [
+   "Patient",
+   "HAS_ALLERGY",
+   "Allergy[Penicillin]"
+  ],
+  [
+   "Patient",
+   "HAS_ALLERGY",
+   "Allergy[Shellfish]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[Depression/Anxiety]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[Diabetes]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[Hypertension]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[Migraines]"
+  ],
+  [
+   "Patient",
+   "HAS_EMERGENCY_CONTACT",
+   "EmergencyContact"
+  ],
+  [
+   "Patient",
+   "HAS_FAMILY_HISTORY",
+   "FamilyMember[Father]"
+  ],
+  [
+   "Patient",
+   "HAS_FAMILY_HISTORY",
+   "FamilyMember[Mother]"
+  ],
+  [
+   "Patient",
+   "HAS_INSURANCE",
+   "InsurancePolicy[Blue River Health]"
+  ],
+  [
+   "Patient",
+   "HAS_INSURANCE",
+   "InsurancePolicy[Lakeside Mutual]"
+  ],
+  [
+   "Patient",
+   "HAS_SPOUSE",
+   "Spouse"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[email]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[release of health information]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[text message]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[voicemail]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Consent for Treatment]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Financial Responsibility Agreement]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Privacy Practices Acknowledgment]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Lisinopril]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Metformin]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Sertraline]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Vitamin D3]"
+  ],
+  [
+   "Surgery[Appendectomy]",
+   "PERFORMED_AT",
+   "Hospital[Springfield General Hospital]"
+  ],
+  [
+   "Surgery[Cesarean section]",
+   "PERFORMED_AT",
+   "Hospital[St. Mary's Medical Center]"
+  ]
+ ]
+}

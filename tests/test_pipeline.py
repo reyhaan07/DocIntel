@@ -120,9 +120,9 @@ def test_signature_by_someone_else_is_uncertain(processed):
     assert any(m["path"] == "hipaa_acknowledgment.printed_name" for m in doc["missing"])
 
 
-def test_seven_checks_and_review_queue_order(processed):
+def test_eight_checks_and_review_queue_order(processed):
     doc = processed["C"]
-    assert len(doc["validation"]["checks"]) == 7
+    assert len(doc["validation"]["checks"]) == 8
     kinds = [r["kind"] for r in doc["review_queue"]]
     assert kinds == ["validation", "validation", "attribute", "attribute", "relationship", "relationship", "relationship"]
     assert [r["review_id"] for r in doc["review_queue"]] == [f"REV_{i:03d}" for i in range(1, 8)]

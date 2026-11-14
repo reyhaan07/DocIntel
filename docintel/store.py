@@ -137,6 +137,36 @@ class Store:
         doc = self.get(doc_id)
         return self._process(doc_id, doc["document"]["filename"], ocr=ocr)
 
+    def apply_review(self, doc_id: str, review_id: str, action: str, value=None, note: str | None = None) -> dict:
+        from . import review
+        from .standardize import fill_standardized
+
+        with self.lock:
+            doc = self.get(doc_id)
+            entry = review.apply(doc, review_id, action, value=value, note=note)
+            if doc["document"].get("template_applied", True) and doc.get("standardized") is not None:
+                std = fill_standardized(doc, self.standardized_path(doc_id))
+                doc["standardized"] = std
+                doc["summary"]["fields_filled"] = std["fields_filled"]
+                doc["summary"]["fields_withheld"] = std["fields_withheld"]
+                for png in (self.doc_dir(doc_id) / "pages").glob("standardized-*.png"):
+                    png.unlink()
+            self.json_path(doc_id).write_text(json.dumps(doc, indent=2), encoding="utf-8")
+            self.write_index()
+            return {"entry": entry, "document": doc}
+
+    def save_ground_truth(self, doc_id: str) -> Path:
+        from .evaluate import to_truth
+
+        doc = self.get(doc_id)
+        open_items = [r for r in doc["review_queue"] if not r.get("resolution")]
+        if open_items:
+            raise ValueError(f"{len(open_items)} review item(s) are still open; resolve them first")
+        out = self.root / "ground_truth" / f"{Path(doc['document']['filename']).stem}.json"
+        out.parent.mkdir(parents=True, exist_ok=True)
+        out.write_text(json.dumps(to_truth(doc), indent=1), encoding="utf-8")
+        return out
+
     def delete(self, doc_id: str) -> None:
         with self.lock:
             ddir = self.doc_dir(doc_id)
