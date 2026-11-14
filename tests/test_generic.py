@@ -103,3 +103,65 @@ def test_unknown_parts_of_a_known_form_are_kept_and_reported(tmp_path):
     targets = {i["target"] for i in check["issues"]}
     assert lang["id"] in targets and pharmacy_phone["id"] in targets
     assert doc["summary"]["text_coverage"] == 1.0
+
+
+# --------------------------------------------------------------------------- labels over values, label lists
+def _record_sheet(path):
+    """Labels printed small over their values (two boxes per row, one alone), a list of
+    labelled values without a header, and a real table."""
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+
+    c = canvas.Canvas(str(path), pagesize=letter)
+    H = letter[1]
+
+    def t(s, x, y, size=10, bold=False):
+        c.setFont("Helvetica-Bold" if bold else "Helvetica", size)
+        c.drawString(x, H - y, s)
+
+    t("Account Activity Statement", 54, 60, 18, True)
+    t("RECORD DETAILS", 60, 100, 11, True)
+    for k, ((l1, v1), (l2, v2)) in enumerate([(("DOCUMENT REFERENCE", "FIN-0568"), ("ISSUED ON", "16-Sep-2026")),
+                                              (("ACCOUNT HOLDER", "Kiran Pillai"), ("BRANCH", "Trichy"))]):
+        y = 130 + k * 46
+        t(l1, 64, y, 7, True); t(l2, 330, y, 7, True)
+        t(v1, 64, y + 13, 11); t(v2, 330, y + 13, 11)
+    t("CURRENCY", 64, 222, 7, True); t("INR", 64, 235, 11)
+    t("SPECIFICATIONS", 60, 280, 11, True)
+    for k, (a, b) in enumerate([("Size", "FULL PAGE"), ("Magazine", "TIME"), ("Field Date", "MARCH 25, 1974")]):
+        t(a, 64, 305 + k * 15); t(b, 230, 305 + k * 15)
+    t("ITEMISED DETAILS", 60, 380, 11, True)
+    for k, row in enumerate([("Date", "Description", "Debit", "Credit"), ("16-Sep-2026", "Opening transfer", "-", "-"),
+                             ("23-Sep-2026", "Service payment", "INR 1,551.00", "-"),
+                             ("30-Sep-2026", "Refund", "-", "INR 1,267.00")]):
+        for x, v in zip((64, 180, 330, 450), row):
+            t(v, x, 405 + k * 18, 9, k == 0)
+    c.save()
+
+
+def test_labels_over_values_label_lists_and_tables(tmp_path):
+    pdf = tmp_path / "sheet.pdf"
+    _record_sheet(pdf)
+    doc = process_pdf(pdf, ocr=False)
+    fields = {e["label"]: e["attributes"]["value"] for e in doc["entities"].values() if e["type"] == "Field"}
+    assert fields["DOCUMENT REFERENCE"]["value"] == "FIN-0568"
+    assert fields["ACCOUNT HOLDER"]["value"] == "Kiran Pillai" and fields["BRANCH"]["value"] == "Trichy"
+    assert fields["CURRENCY"]["value"] == "INR"  # a single box: label over value
+    assert fields["Size"]["value"] == "FULL PAGE" and fields["Magazine"]["value"] == "TIME"  # a list, not a table
+    rows = [e for e in doc["entities"].values() if e["type"] == "TableRow"]
+    assert len(rows) == 3  # only the itemised table is a table
+    pay = next(e for e in rows if e["label"] == "23-Sep-2026")["attributes"]
+    assert pay["debit"]["value"] == "INR 1,551.00" and pay["description"]["value"] == "Service payment"
+
+
+def test_value_and_label_heuristics():
+    from docintel.generic import _reads_like_label, _value_like_header
+    from docintel.ocr import fix_digit_letters
+
+    assert fix_digit_letters("FIN-O600") == "FIN-0600" and fix_digit_letters("UTROO00000616") == "UTR0000000616"
+    assert fix_digit_letters("Room") == "Room" and fix_digit_letters("INR") == "INR"
+    assert _value_like_header([("Tobacco Rod Length", None), ("64 mm", None)])
+    assert _value_like_header([("Written by", None), ("D. Schickedantz", None)])
+    assert not _value_like_header([("Date", None), ("Description", None)])
+    assert _reads_like_label("Authorized Signature") and _reads_like_label("Total Contract")
+    assert not _reads_like_label("Kiran Pillai") and not _reads_like_label("Approved")

@@ -71,7 +71,32 @@ def detect_value(raw: str, date_order: str = "mdy", label: str = ""):
     return v, "text"
 
 
+# words that name a field rather than fill it
+LABEL_WORDS = {
+    "date", "name", "names", "signature", "number", "no", "address", "phone", "telephone", "fax", "title", "total",
+    "amount", "code", "type", "status", "description", "cost", "reference", "department", "company", "city", "state",
+    "zip", "email", "page", "project", "brand", "budget", "account", "qty", "quantity", "unit", "units", "price",
+    "value", "by", "authorized", "initials", "remarks", "comments", "of", "and",
+    "the", "for", "to", "dept", "tel", "id", "item", "items", "year", "month", "week", "time", "period", "rate",
+}
+
+
+def _reads_like_label(raw: str) -> bool:
+    """'Total Contract', 'Date', 'Authorized Signature': a value made of field names."""
+    words = re.findall(r"[A-Za-z]+", raw or "")
+    if not words or re.search(r"\d", raw or ""):
+        return False
+    hits = sum(1 for w in words if w.lower() in LABEL_WORDS)
+    named = sum(1 for w in words if w.lower() in LABEL_WORDS - {"of", "and", "the", "for", "to", "by"})
+    return named >= 1 and hits >= 0.5 * len(words)
+
+
 def _generic_flags(binder, attr: Attribute, raw: str, vtype: str, continued: bool) -> None:
+    ocr = attr.extraction_method.startswith("ocr")
+    if ocr and attr.status == "valid" and _reads_like_label(raw):
+        # on a scan, a 'value' made of field names is most likely the next label over an empty box
+        attr.notes.append(f"the value '{raw}' reads like another label; the field may be empty - confirm")
+        attr.status = "needs_review"
     if vtype == "date" and binder.date_order not in ("mdy", "dmy") and is_ambiguous_date(raw):
         attr.notes.append(f"'{raw}' could be read day-first or month-first and nothing else on the document "
                           f"settles it; read as {attr.value}")
@@ -177,10 +202,32 @@ def _generic_table(lines: list[Line], region: Region, start: int, binder_boxes: 
         rs = size([t for l in row.lines for t in l.tokens])
         if rows and header_size and first_size and abs(header_size - first_size) > 0.8 and abs(rs - header_size) < 0.3:
             break
+        rtoks = [t for l in row.lines for t in l.tokens if t.kind == "word"]
+        rtext = join_tokens(rtoks)
+        letters = re.sub(r"[^A-Za-z]", "", rtext)
+        filled = sum(1 for c in row.cells.values() if c.text)
+        if rows and filled == 1 and letters.isupper() and len(rtoks) <= 4 and not re.search(r"\d", rtext):
+            break  # a capitals heading line ("NOTES / DECLARATION") starts something else
+        cells_text = [c.text for c in row.cells.values() if c.text]
+        if filled >= 2 and all(re.sub(r"[^A-Za-z]", "", x).isupper() and len(re.sub(r"[^A-Za-z]", "", x)) >= 3
+                               and not re.search(r"\d", x) for x in cells_text) and \
+                all(re.sub(r"[^A-Za-z]", "", tx).isupper() for tx in texts):
+            break  # another row of capitals labels like the header: the next labels-over-values pair
+        if rows and len(rtoks) >= 5 and rtext.rstrip().endswith(".") and not any(
+                join_tokens([t for l in r.lines for t in l.tokens]).rstrip().endswith(".") for r in rows):
+            break  # a sentence after rows that had none is text, not a record
         gaps.append(gap)
         rows.append(row)
         prev_bottom = max(l.bottom for l in row.lines)
     if not rows:
+        return None
+    # a table holds records: several rows that fill more than one column.  Rows of single
+    # cells under a line of words, or a first column of "Label:" entries, are something else
+    multi = [r for r in rows if sum(1 for c in r.cells.values() if c.text) >= 2]
+    keys = [r.cells[table.columns[0][0]["key"]].text for r in rows if r.cells[table.columns[0][0]["key"]].text]
+    if len(rows) >= 2 and (len(multi) < 2 or len(multi) < 0.6 * len(rows)):
+        return None
+    if keys and sum(1 for k in keys if k.rstrip().endswith(":")) >= 0.5 * len(keys):
         return None
     # labels printed above value boxes ("Full name" over a box, then "Mobile" over the
     # next box) are fields, not a table: the row after the boxed row is not boxed
@@ -298,6 +345,87 @@ def _below_table():
     return _BELOW_TABLE
 
 
+_NAME_LIKE = re.compile(r"^(?:[A-Z][a-z]+|[A-Z]\.)(?:\s+(?:[A-Z]\.|[A-Z][a-z]+|Mc[A-Z][a-z]+)){1,3}$")
+
+
+def _value_like_header(header) -> bool:
+    """A 'header' line that holds data is a label and its value, not column names:
+    a measurement, code or number ("64 mm", "R/BSS-71-19"), a person's name
+    ("D. Schickedantz"), a sentence, or a label ending in ':' before it."""
+    (left, _), (right, _) = header[0], header[1]
+    if left.rstrip().endswith(":"):
+        return True
+    r = right.strip()
+    if re.search(r"\d", r) or r.endswith(".") or _NAME_LIKE.match(r) and re.search(r"[A-Z]\.", r):
+        return True
+    letters_r = re.sub(r"[^A-Za-z]", "", r)
+    letters_l = re.sub(r"[^A-Za-z]", "", left)
+    return bool(letters_r) and letters_r.isupper() and not letters_l.isupper() and len(r.split()) <= 4
+
+
+def _caps(text: str) -> bool:
+    letters = re.sub(r"[^A-Za-z]", "", text)
+    return len(letters) >= 3 and letters.isupper() and not re.search(r"\d", text)
+
+
+def _stacked_pairs(lines: list[Line], k: int):
+    """Line k holds labels printed above their values (forms that print 'ISSUED ON' small
+    over the date, often two boxes side by side): groups of capitals, no digits, no colon.
+    The line right under it holds the values, each under its label's column; a value may
+    wrap onto further tight lines.  Returns ([(label tokens, value tokens)], value line
+    count) or None."""
+    if k + 1 >= len(lines):
+        return None
+    ln, nx = lines[k], lines[k + 1]
+    words = [t for t in ln.tokens if t.kind == "word"]
+    if not words or len(words) != len(ln.tokens) or len(words) > 10:
+        return None
+    segs = segments(ln, gap=12)
+    if len(segs) > 3 or any(len(sg) > 5 or not _caps(join_tokens(sg)) or sg[-1].text.endswith((":", "."))
+                            for sg in segs):
+        return None
+    vals = [t for t in nx.tokens if t.kind == "word"]
+    if not vals or nx.page != ln.page or len(vals) > 12 or any(t.source == "form_field" for t in nx.tokens):
+        return None
+    if len(segs) == 1 and len(segments(nx, gap=12)) > 1:
+        return None  # one label over a line holding more than one thing: not its value
+    h = max(t.height for t in words)
+    if nx.top - ln.bottom > 1.4 * h + 2:
+        return None
+    starts = [sg[0].x0 for sg in segs]
+    if min(abs(vals[0].x0 - x) for x in starts) > 6:
+        return None
+    vtext = join_tokens(vals)
+    if vtext.rstrip().endswith(".") and len(vals) >= 4 and len(segs) == 1:
+        return None
+    if _caps(vtext) and len(vals) > 1 and len(segs) == 1:
+        return None  # two lines of capitals: a heading over a heading, not a label over a value
+    vsegs = segments(nx, gap=12)
+    if len(vsegs) >= 1 and all(_caps(join_tokens(sg)) for sg in vsegs) and (len(vsegs) > 1 or len(segs) > 1):
+        return None  # a row of labels under a row of labels: the boxes are empty, nothing is paired
+    if any(t.text.endswith(":") and not (t.source == "ocr" and t.text[:1].islower()) for t in vals):
+        return None
+    # a value may wrap: further lines set tight under it, starting where it starts
+    n = 1
+    while k + n + 1 < len(lines) and n < 3:
+        a, b = lines[k + n], lines[k + n + 1]
+        if b.page != a.page or b.top - a.bottom > 0.6 * max(t.height for t in a.tokens) or \
+                min(abs(b.tokens[0].x0 - x) for x in starts) > 6 or any(t.kind != "word" for t in b.tokens):
+            break
+        if _caps(join_tokens(b.tokens)):
+            break  # the next labels
+        n += 1
+    vt_all = [t for j in range(k + 1, k + 1 + n) for t in lines[j].tokens if t.kind == "word"]
+    pairs = []
+    for i, sg in enumerate(segs):
+        x0 = sg[0].x0 - 6
+        x1 = segs[i + 1][0].x0 - 6 if i + 1 < len(segs) else 1e9
+        pairs.append((list(sg), [t for t in vt_all if x0 <= t.x0 < x1]))
+    if any(not any(t.x0 >= sg[0].x0 - 6 for sg in segs) for t in vt_all):
+        return None  # values start left of every label: not under them
+    return pairs, n
+
+
 def extract_structure(binder) -> Structure:
     """Read the template-free structure of every region (plus untitled page areas)."""
     from .bind import _parse_kv_line
@@ -370,6 +498,53 @@ def extract_structure(binder) -> Structure:
             # a signature block (values over their labels) is not a table header and its row
             sig_block = labels_below(lines, i + 1, _below_table())
             gt = _generic_table(lines, region, i, boxes_by_page) if i not in used and not sig_block else None
+            if gt and len(gt.header) == 2 and _value_like_header(gt.header):
+                # "Size | FULL PAGE", "Written by | D. Schickedantz": the first line is a label and
+                # its value, so every line is - a list of labelled values, not a table
+                pairs_ = [(list(gt.header[0][1]), list(gt.header[1][1]))]
+                for row in gt.rows:
+                    cols = [row.cells.get(spec["key"]) for spec, *_r in gt.table.columns]
+                    lt = cols[0].all_tokens if cols[0] else []
+                    vt = cols[1].all_tokens if len(cols) > 1 and cols[1] else []
+                    if lt:
+                        pairs_.append((lt, vt))
+                for lt, vt in pairs_:
+                    f = GField(region, lt, vt, label_text(join_tokens(lt)), clean(join_tokens(vt)))
+                    st.fields.append(f)
+                    _assign(st, lt, "label")
+                    _assign(st, vt, "value")
+                consumed = {id(lines[i])} | {id(ln) for row in gt.rows for ln in row.lines}
+                used |= {k for k in range(len(lines)) if id(lines[k]) in consumed
+                         or all(id(t) in st.roles for t in lines[k].tokens)}
+                i += 1
+                continue
+            if gt and len(gt.rows) == 1 and all(_caps(c.text) or c.text.rstrip().endswith(":")
+                                                 for c in gt.rows[0].cells.values() if c.text) and \
+                    all(_caps(tx) for tx, _ in gt.header):
+                # two rows of labels and nothing filled in under them: not a table, and no pairs
+                for tx, seg in gt.header:
+                    st.text.append((region, list(seg)))
+                    _assign(st, list(seg), "text")
+                i += 1
+                continue
+            if gt and len(gt.rows) == 1 and not region.key.startswith(("current_", "allergies", "surgical")):
+                # a row of labels over one row of values is a row of fields ("ISSUED ON" over its
+                # date), not a table: a table has records, at least two of them
+                row = gt.rows[0]
+                for (text, seg), (spec, *_rest) in zip(gt.header, gt.table.columns):
+                    cell = row.cells.get(spec["key"])
+                    vt = cell.all_tokens if cell else []
+                    f = GField(region, list(seg), vt, label_text(text), clean(join_tokens(vt)))
+                    st.fields.append(f)
+                    _assign(st, list(seg), "label")
+                    _assign(st, vt, "value")
+                consumed = {id(lines[i])} | {id(ln) for ln in row.lines}
+                if gt.table.header is not lines[i]:
+                    consumed |= {id(t) for t in []}
+                used |= {k for k in range(len(lines)) if id(lines[k]) in consumed
+                         or all(id(t) in st.roles for t in lines[k].tokens)}
+                i += 1
+                continue
             if gt:
                 st.tables.append(gt)
                 last_table[region.key] = gt
@@ -396,6 +571,20 @@ def extract_structure(binder) -> Structure:
                 continue
             toks = [t for t in ln.tokens if id(t) not in st.roles]
             if not toks:
+                continue
+            # a small capitals label with its value right under it ("CURRENCY" over "INR")
+            stacked = _stacked_pairs(lines, k) if k + 1 not in used and len(toks) == len(ln.tokens) else None
+            if stacked:
+                pairs_, nlines = stacked
+                vlines = [j for j in range(k + 1, k + 1 + nlines) if j not in used]
+                for ltoks, vt in pairs_:
+                    vt = [t for t in vt if id(t) not in st.roles]
+                    f = GField(region, ltoks, vt, label_text(join_tokens(ltoks)), clean(join_tokens(vt)),
+                               continued=len({id(t.top) for t in vt}) > 1 and len(vlines) > 1)
+                    st.fields.append(f)
+                    _assign(st, ltoks, "label")
+                    _assign(st, vt, "value")
+                used.update(vlines)
                 continue
             # values whose labels are printed on the line below (a signature block)
             below = labels_below(lines, k + 1, _below_table()) if k + 1 not in used else []

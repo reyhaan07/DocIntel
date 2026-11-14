@@ -143,3 +143,31 @@ def test_doubtful_ocr_values_go_to_review_not_into_the_record(scanned):
     assert {f"{eid}.{k}" for eid, k, _ in flagged} <= queued
     for _, _, a in flagged:
         assert a["notes"]
+
+
+@needs_engine
+def test_light_text_on_a_dark_header_band(tmp_path):
+    """White text on a dark table header is read (inverted and cleaned before OCR)."""
+    from reportlab.lib.colors import HexColor
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+
+    from docintel.samples import make_scanned
+
+    src = tmp_path / "band.pdf"
+    c = canvas.Canvas(str(src), pagesize=letter)
+    H = letter[1]
+    c.setFillColor(HexColor("#3d5470"))
+    c.rect(54, H - 220, 500, 22, stroke=0, fill=1)
+    c.setFillColor(HexColor("#ffffff"))
+    c.setFont("Helvetica-Bold", 11)
+    for x, w in ((64, "Date"), (190, "Description"), (340, "Debit"), (460, "Credit")):
+        c.drawString(x, H - 213, w)
+    c.setFillColor(HexColor("#000000"))
+    c.setFont("Helvetica", 10)
+    c.drawString(64, H - 240, "16-Sep-2026")
+    c.save()
+    scan = tmp_path / "band_scan.pdf"
+    make_scanned(src, scan, dpi=150, seed=3, angles=[0.0])
+    words = {t.text for t in ocr.ocr_page(scan, 1, 612, 792).tokens}
+    assert {"Date", "Description", "Debit", "Credit"} <= words

@@ -119,7 +119,7 @@ def _page_style(lines: list[Line]) -> dict:
             "gap": _median(gaps, 6.0)}
 
 
-def _generic_heading(ln: Line, prev: Line | None, style: dict) -> bool:
+def _generic_heading(ln: Line, prev: Line | None, style: dict, nxt: Line | None = None) -> bool:
     """A heading recognised by how it is printed: short, alphabetic, on its own line, and
     set apart by weight, size, capitals or space above.  Used for sections the template
     does not know, so that they still close the section above them."""
@@ -142,13 +142,31 @@ def _generic_heading(ln: Line, prev: Line | None, style: dict) -> bool:
     bigger = bool(style["size"] and sizes and min(sizes) >= style["size"] + 1.5) or \
         (all(t.source == "ocr" for t in toks) and _median([t.height for t in toks]) >= 1.2 * style["height"])
     gap_above = prev is None or prev.page != ln.page or (ln.top - prev.bottom) >= max(9.0, 1.6 * style["gap"])
+    if prev is not None and prev.page == ln.page and ln.top - prev.bottom < 1.6 * _median([t.height for t in toks], 9.0) + 2:
+        lx0, lx1 = min(t.x0 for t in toks), max(t.x1 for t in toks)
+        above = [t for t in prev.tokens if t.x1 > lx0 - 6 and t.x0 < lx1 + 6]
+        ptext = re.sub(r"[^A-Za-z]", "", " ".join(t.text for t in above))
+        if above and ptext.isupper() and len(above) <= 5 and \
+                _median([t.height for t in above], 9.0) < _median([t.height for t in toks], 9.0):
+            return False  # set tight under a small capitals label ("RETURN STATUS"): it is that label's value
+    if nxt is not None and nxt.page == ln.page and nxt.top - ln.bottom < 1.5 * _median([t.height for t in toks], 9.0) + 2 \
+            and abs(nxt.tokens[0].x0 - toks[0].x0) <= 6 and all(t.kind == "word" and t.source != "form_field"
+                                                                for t in nxt.tokens) and len(segments(nxt, gap=12)) == 1:
+        # printed small over a larger line that starts where it starts: a label over its value
+        mine = _median([t.size or t.height for t in toks], 0)
+        theirs = _median([t.size or t.height for t in nxt.tokens], 0)
+        if mine and theirs and theirs >= 1.25 * mine and len(nxt.tokens) <= 8 \
+                and not " ".join(t.text for t in nxt.tokens).rstrip().endswith("."):
+            return False
     if colon:  # "PATIENT INFORMATION:" alone on its line is a heading only when set apart by style
         return caps and (bold or bigger)
     if caps and (bold or bigger or gap_above):
         return True
     # bold *and* larger than the text is a heading even when set tight under a table; OCR has
     # no font weight, so there clearly larger text stands in for it
-    much_bigger = all(t.source == "ocr" for t in toks) and _median([t.height for t in toks]) >= 1.3 * style["height"]
+    much_bigger = all(t.source == "ocr" for t in toks) and _median([t.height for t in toks]) >= 1.3 * style["height"] \
+        and (len(words) >= 2 or caps)  # one larger word on a scan is as often a value as a heading
+
     return titled and ((bold and bigger) or much_bigger or ((bold or bigger) and gap_above))
 
 
@@ -164,7 +182,8 @@ def find_headings(lines: list[Line], template: Template, generic: bool = True) -
     found = []
     style = _page_style(lines)
     prev = None
-    for ln in lines:
+    for li, ln in enumerate(lines):
+        nxt = lines[li + 1] if li + 1 < len(lines) else None
         line_heads = []
         segs = segments(ln)
         for seg in segs:
@@ -196,7 +215,7 @@ def find_headings(lines: list[Line], template: Template, generic: bool = True) -
         # a lone matching word inside a table header row is not a heading
         if line_heads and len(line_heads) == len(segs):
             found.extend(line_heads)
-        elif generic and _generic_heading(ln, prev, style):
+        elif generic and _generic_heading(ln, prev, style, nxt):
             text = " ".join(t.text for t in ln.tokens)
             plain = strip_numbering(text).rstrip(" :")
             found.append(Heading("other:" + slug(plain), text, list(ln.tokens), ln.page,
@@ -407,6 +426,11 @@ def kv_table(lines: list[Line], boxes: list | None = None, columns: tuple[float,
     for ln in lines:
         lab = [t for t in ln.tokens if t.x0 < xv - 3]
         val = [t for t in ln.tokens if t.x0 >= xv - 3]
+        gaps = [ln.tokens[i + 1].x0 - ln.tokens[i].x1 for i in range(len(ln.tokens) - 1)]
+        if sum(1 for g in gaps if g >= 30) > 1:  # three or more columns: a table row, not label | value
+            if started:
+                break
+            continue
         starts_label = bool(lab) and abs(lab[0].x0 - xl) <= 3
         starts_value = bool(val) and abs(val[0].x0 - xv) <= 3
         fits = (not lab or starts_label) and (not val or starts_value) and \
@@ -445,11 +469,24 @@ def kv_table(lines: list[Line], boxes: list | None = None, columns: tuple[float,
     return rows
 
 
+def _caps_label(toks) -> bool:
+    text = join_tokens([t for t in toks if t.kind == "word"])
+    letters = re.sub(r"[^A-Za-z]", "", text)
+    return len(letters) >= 3 and letters.isupper() and not re.search(r"\d", text)
+
+
+def stacked_grid(rows: list[KVRow]) -> bool:
+    """Rows that alternate between a row of labels and a row of values (labels printed
+    above their values, two boxes side by side) are not label | value rows."""
+    both = sum(1 for r in rows if r.label and r.value and _caps_label(r.label) and _caps_label(r.value))
+    return both >= 2
+
+
 def is_kv_table(rows: list[KVRow], known_label) -> bool:
     """A two-column table is a field/value table (not a list of records) when it says so
     in its header, or when most of its left cells are labels: known field names, or
     text ending in ':' or '?'."""
-    if not rows:
+    if not rows or stacked_grid(rows):
         return False
     if rows[0].header and _KV_HEAD_LEFT.match(join_tokens(rows[0].label)):
         return True
@@ -639,6 +676,10 @@ def header_second_line(lines: list[Line], li: int) -> Line | None:
     h = _median([t.height for t in ln.tokens], 8.0)
     if nx.top - ln.bottom > 0.6 * h or len(nx.tokens) > len(ln.tokens):
         return None
+    if any(t.source == "text" for t in ln.tokens + nx.tokens):
+        # printed text says how a header is set: bold like the line above, and tighter than a line gap
+        if not (all(t.bold for t in ln.tokens) and all(t.bold for t in nx.tokens)) or nx.top - ln.bottom > 0.4 * h:
+            return None
     if any(re.search(r"\d", t.text) or t.text.endswith(":") for t in nx.tokens):
         return None
     for t in nx.tokens:

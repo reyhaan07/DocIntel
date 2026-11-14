@@ -10,7 +10,7 @@ import re
 from collections import defaultdict
 
 from .layout import (Cell, Table, bbox_of, build_lines, build_regions, checkbox_options, continuation_tokens,
-                     is_kv_table, kv_columns, kv_table, labels_below, slug,
+                     is_kv_table, kv_columns, kv_table, labels_below, slug, stacked_grid,
                      continue_table, find_table, join_tokens, match_aliases, region_lines)
 from .models import Attribute, Entity, Line, PageData, Region, Token
 from .normalize import (clean, none_answer, split_dose_frequency, infer_date_order, is_ambiguous_date, label_text, name_key, normalise, split_list,
@@ -108,9 +108,10 @@ def _parse_kv_line(tokens: list[Token], table) -> list[tuple[dict | None, list[T
                     labels.append((i, end, spec))
                     i = end
                     continue
-            if (t.text.endswith(":") and t.source == "ocr" and t.text[:1].islower() and labels and i > 0
-                    and tokens[i - 1].kind == "word" and t.x0 - tokens[i - 1].x1 < 0.6 * t.height):
-                i += 1  # OCR reads ';' as ':' - "10 mg daily: Metformin" continues the value
+            if (t.text.endswith(":") and t.source == "ocr" and t.text[:1].islower() and i > 0
+                    and tokens[i - 1].kind == "word" and t.x0 - tokens[i - 1].x1 < 0.6 * t.height
+                    and (labels or (i >= 2 and i + 1 < n and tokens[i + 1].text[:1].islower()))):
+                i += 1  # OCR reads ';' as ':' - "10 mg daily: Metformin", "fictional records: no real ..."
                 continue
             if t.text.endswith(":") and len(t.text) > 1 and not re.search(r"\d:\d", t.text):
                 start = i
@@ -403,6 +404,11 @@ class Binder:
             if low.conf < OCR_REVIEW_CONF:
                 status = "needs_review"
                 notes.append(f"OCR read '{low.text}' with low confidence ({low.conf:.2f}); confirm it against the page")
+            fixed = [t for t in ocr_words if (t.hint or "").startswith("ocr-read:")]
+            if fixed:
+                status = "needs_review"
+                notes.append(f"OCR read '{fixed[0].hint[9:]}'; letters that look like digits (O/0, l/1) inside a "
+                             f"number were read as digits ('{fixed[0].text}') - confirm against the page")
             else:
                 # 'I' and 'l' look alike in many fonts: "Meera lyer" among capitalised words is
                 # probably "Iyer" - never trusted silently
@@ -482,8 +488,8 @@ class Binder:
                     short = kv_table(lines, boxes, columns=cols, min_rows=1)
                     body = [r for r in short if not r.header and r.label]
                     covered = sum(len(r.lines) for r in short) == len(lines)  # every line sits in the page's columns
-                    if body and (all(self.known_label(r.label) for r in body) or
-                                 (covered and all(r.value for r in body))):
+                    if body and not stacked_grid(short) and (all(self.known_label(r.label) for r in body) or
+                                                             (covered and all(r.value for r in body))):
                         rows = short
             self._kv_cache[region.region_id] = rows
         return self._kv_cache[region.region_id]
@@ -999,6 +1005,10 @@ class Binder:
             if cspec.get("unknown"):
                 attr = self.make_attr(raw, htoks, cell.all_tokens, "table", region, raw=raw, row=rowno)
                 attr.notes.append(f"column '{cspec['label']}' is not part of the template; kept as printed")
+                if any(t.source == "ocr" for t in htoks) and attr.status == "valid":
+                    # a column name read by OCR that matches nothing known may be a misread known column
+                    attr.status = "needs_review"
+                    attr.notes.append("its column name was read by OCR and matches no known column - confirm")
                 ent.attributes[ckey] = attr
                 continue
             value, ok = normalise(raw, cspec.get("type", "text"), self.parse_order)

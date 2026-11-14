@@ -192,6 +192,49 @@ def _grid(arr, cell_px: float, thresh: int = 110):
     return ink.reshape(hh // step, step, ww // step, step).any(axis=(1, 3)), step
 
 
+def invert_dark_bands(arr):
+    """Text printed on a shaded band (a table's header row, a title bar) is turned into
+    black text on white, which is what the OCR engine reads.  A band is a filled
+    rectangle, at least about half an inch wide, clearly darker than the page; light text
+    on it is inverted, dark text on it is kept.  Returns (array, number of bands)."""
+    import numpy as np
+
+    h, w = arr.shape
+    step = max(1, int(round(SCALE * 2.0)))
+    hh, ww = h // step * step, w // step * step
+    cells = (arr[:hh, :ww] < 160).reshape(hh // step, step, ww // step, step).mean(axis=(1, 3))
+    dark = cells > 0.45
+    out = arr
+    n = 0
+    for r0, c0, r1, c1, cnt in _components(dark, 12):
+        bw, bh = (c1 - c0 + 1) * 2.0, (r1 - r0 + 1) * 2.0  # points
+        fill = cnt / ((c1 - c0 + 1) * (r1 - r0 + 1))
+        if bw < 60 or bh < 9 or bh > 60 or fill < 0.75:
+            continue  # a bold word is a small dark blob too; a band is a wide filled bar
+        y0, y1, x0, x1 = r0 * step, (r1 + 1) * step, c0 * step, (c1 + 1) * step
+        band = arr[y0:y1, x0:x1].astype(np.int16)
+        bg = float(np.median(band))
+        light = float((band > bg + 50).mean())
+        darker = float((band < bg - 50).mean())
+        if bg > 170 or not (0.01 <= light <= 0.45) or darker > 0.1:
+            continue  # not a dark bar mostly made of background with some light text on it
+        band = 255 - band  # light text on a dark band: invert
+        bg = 255 - bg
+        thr = (bg + float(band.min())) / 2.0
+        bin_ = np.where(band < thr, 0, 255).astype(arr.dtype)
+        # the light page caught at the band's edges would turn into black lines: keep the frame white
+        m = max(1, int(round(SCALE * 1.5)))
+        bin_[:m, :] = 255
+        bin_[-m:, :] = 255
+        bin_[:, :m] = 255
+        bin_[:, -m:] = 255
+        if out is arr:
+            out = arr.copy()
+        out[y0:y1, x0:x1] = bin_
+        n += 1
+    return out, n
+
+
 def find_checkboxes(arr, tokens: list[Token], page: int) -> tuple[list[Token], list[Token]]:
     """Drawn check boxes on a scanned page.  Returns (checkbox tokens, OCR tokens to drop)."""
     import numpy as np
@@ -315,6 +358,25 @@ def _split_glued(text: str) -> list[tuple[str, float, float]]:
     return [(a, 0.0, cut), (b, min(1.0, cut + 1 / max(1, len(text))), 1.0)]
 
 
+_DIGIT_RUN = re.compile(r"[0-9OoIl|]{2,}")
+
+
+def fix_digit_letters(text: str) -> str:
+    """'FIN-O600' -> 'FIN-0600', 'UTROO00000616' -> 'UTR0000000616': inside a run of digits,
+    an O read for 0 or an l/I read for 1.  Only runs that contain real digits are touched,
+    so words are never changed.  Callers send the corrected value to review."""
+    def fix(m):
+        run = m.group(0)
+        if not re.search(r"\d", run) or not re.search(r"[OoIl|]", run):
+            return run
+        # a run of letters that merely ends in digits is a word plus a number ("Room1"): keep the
+        # leading letters unless they sit between digits
+        return run.translate(str.maketrans({"O": "0", "o": "0", "I": "1", "l": "1", "|": "1"}))
+    out = _DIGIT_RUN.sub(fix, text)
+    # a whole word of letters is not a run of digits, whatever is around it
+    return out if re.sub(r"[^A-Za-z]", "", out) or re.search(r"\d", text) else text
+
+
 def _tesseract_words(img, config: str, page_number: int) -> list[Token]:
     import os
 
@@ -338,7 +400,9 @@ def _tesseract_words(img, config: str, page_number: int) -> list[Token]:
         top = data["top"][i] / SCALE
         bottom = top + data["height"][i] / SCALE
         for piece, f0, f1 in _split_glued(text):
-            out.append(Token(piece, x0 + w * f0, top, x0 + w * f1, bottom, page_number, "ocr", conf=conf))
+            fixed = fix_digit_letters(piece)
+            out.append(Token(fixed, x0 + w * f0, top, x0 + w * f1, bottom, page_number, "ocr", conf=conf,
+                             hint=f"ocr-read:{piece}" if fixed != piece else None))
     return out
 
 
@@ -413,6 +477,7 @@ def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float
     if angle:
         img = img.rotate(angle, resample=Image.BICUBIC, fillcolor=255)
     page_arr = np.asarray(img)
+    page_arr, bands = invert_dark_bands(page_arr)
     clean, line_px = remove_lines(page_arr)
     clean_img = Image.fromarray(clean)
     from concurrent.futures import ThreadPoolExecutor
@@ -431,4 +496,6 @@ def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float
         notes.insert(0, f"page turned {rotation} degrees clockwise to read it upright")
     if line_px:
         notes.append("ruled lines and box borders removed before OCR")
+    if bands:
+        notes.append(f"{bands} shaded band(s) (table headers, title bars) cleaned to black on white before OCR")
     return OcrPage(tokens, marks, angle, width, height, notes, rotation)

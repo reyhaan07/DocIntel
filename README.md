@@ -101,6 +101,13 @@ No doctor is invented for a row that has none; the gap is reported as missing.
 | `State: California`, `Location: Los Angeles, California` | Full state names become codes; a city and state is a location, not a hospital |
 | `Dr. Test Provider 1` and `Dr. Test Provider 2` | Different people: numbers in a name are never ignored |
 | OCR `lyer` among capitalised words | Probably `Iyer` (capital I and small l look alike): sent for review |
+| Labels printed small above their values (`ISSUED ON` over the date), two boxes per row or one alone | Each label takes the value under it, even when part of the row was not read; a row of labels under a row of labels means empty boxes, so nothing is paired |
+| A list of labelled values with no header (`Size … FULL PAGE`, `Written by … D. Schickedantz`) | Read as fields. A line that holds data (a measurement, a code, a person's name, a sentence) is never a column header |
+| A "table" of one row, or one whose rows do not fill several columns | Not a table: a table holds records. A row of capitals labels, a capitals heading or a sentence ends a table |
+| White text on a dark table-header bar (scans) | The bar is found, inverted and cleaned to black on white before OCR; a bold word is not mistaken for a bar |
+| A larger value under a small capitals label (`STATUS` / `SUCCESS`, `MANAGER` / `Diya Raman`) | The value, not a heading. A small label over a larger value is a label, not a heading |
+| OCR `FIN-O600`, `UTROO00000616`, `neiljosepho8` | O/0 and l/1 inside numbers corrected (`FIN-0600`) **and sent for review**; whole words are never changed |
+| A value that reads like a label on a scan (`Date`, `Authorized Signature`, `Total Contract`) | Most likely the next label over an empty box: sent for review |
 | `+44 20 7946 0958`, `0049 30 1234567`, `ext. 12` | International numbers kept as written (never re-grouped as US numbers); extensions kept |
 
 ## Quick start
@@ -221,6 +228,26 @@ How the suite grows toward 100 %:
 2. Run `python -m docintel evaluate <folder> --truth <folder> --strict` on every change. It
    fails on any silent error.
 3. Every error it shows becomes a rule, an alias or a template for a new document type.
+
+### Benchmarks on documents docintel was not built from
+
+`benchmarks/` measures docintel on two outside sets. Each is split into a development
+half (failures inspected, causes fixed) and a held-out half (only measured). See
+[`benchmarks/README.md`](benchmarks/README.md).
+
+| held-out half | before this round | now |
+|---|---|---|
+| OCR test suite, 100 scanned documents in 10 domains: fields correct | 86.7 % | 99.0 % |
+| … table cells correct | 3.4 % | 100 % |
+| … words of the text read | 97.8 % | 98.8 % |
+| … **silent errors** | 42 | 1 |
+| FUNSD, 50 noisy scanned forms: label → value links stated correctly (precision) | 52.1 % | 58.4 % |
+| … links found (recall) | 20.5 % | 22.5 % |
+| … **silent errors** | 88 | 80 |
+
+FUNSD's faxed 1980s forms (handwriting, stamps, 100 dpi scans, labels without colons)
+remain hard for any reader without a template. The silent errors left there are the
+work still ahead: each one is a case where docintel cannot yet see its own doubt.
 
 ## Document types and templates
 
