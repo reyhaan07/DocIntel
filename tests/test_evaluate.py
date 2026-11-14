@@ -91,3 +91,13 @@ def test_phone_numbers_beyond_us_format():
     assert normalise("+1 312 555 0147", "phone") == ("(312) 555-0147", True)
     assert normalise("312.555.0147 x45", "phone") == ("(312) 555-0147 ext. 45", True)
     assert normalise("555-0147", "phone")[1] is False  # too short: reviewed
+
+
+def test_names_states_places():
+    from docintel.normalize import is_place, normalise, same_person
+
+    assert not same_person("Dr. Test Provider 1", "Dr. Test Provider 2")  # numbers tell people apart
+    assert normalise("California", "state") == ("CA", True) and normalise("Calif", "state")[0] == "CA"
+    assert normalise("ZZ", "state")[1] is False
+    assert is_place("Los Angeles, California") and is_place("Dayton, OH 45402") and not is_place("St. Mary's Hospital")
+    assert normalise("Yes — weekly", "yes_no") == ("yes", True) and normalise("maybe", "yes_no")[1] is False

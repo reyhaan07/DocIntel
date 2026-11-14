@@ -10,12 +10,12 @@ import re
 from collections import defaultdict
 
 from .layout import (Cell, Table, bbox_of, build_lines, build_regions, checkbox_options, continuation_tokens,
-                     labels_below,
+                     is_kv_table, kv_columns, kv_table, labels_below, slug,
                      continue_table, find_table, join_tokens, match_aliases, region_lines)
 from .models import Attribute, Entity, Line, PageData, Region, Token
 from .normalize import (clean, none_answer, split_dose_frequency, infer_date_order, is_ambiguous_date, label_text, name_key, normalise, split_list,
-                        middle_initial, split_person_name)
-from .template import Template, norm, norm_tokens
+                        is_place, middle_initial, split_person_name)
+from .template import Template, canon_tokens, norm, norm_tokens, strip_numbering
 
 TYPE_NAMES = {
     "Patient": "Patient", "Spouse": "Spouse", "EmergencyContact": "Emergency contact",
@@ -116,7 +116,8 @@ def _parse_kv_line(tokens: list[Token], table) -> list[tuple[dict | None, list[T
                 start = i
                 floor = labels[-1][1] if labels else 0
                 while (start - 1 >= floor and i - start < 4 and tokens[start - 1].kind == "word"
-                       and not tokens[start - 1].text.endswith(":") and tokens[start].x0 - tokens[start - 1].x1 < 5):
+                       and not tokens[start - 1].text.endswith((":", ".", ";", ","))
+                       and tokens[start].x0 - tokens[start - 1].x1 < 5):
                     start -= 1
                 if after_box(start):
                     i += 1
@@ -169,6 +170,54 @@ def _hint_conflict(raw: str, order: str) -> bool:
     a, b = int(m.group(1)), int(m.group(2))
     month = a if order == "mdy" else b
     return month > 12
+
+
+def whole_label(ltoks: list[Token], table) -> dict | None:
+    """The field a label names when the *whole* label is that field's name (a trailing
+    colon or a bracketed format hint may follow).  Used for labels that carry no colon
+    of their own, such as the left cell of a field/value table."""
+    toks = [t for t in ltoks if t.kind == "word" and t.text.strip(":")]
+    if not toks:
+        return None
+    m = match_aliases(toks, 0, table)
+    if not m:
+        return None
+    consumed, spec = m
+    rest = toks[consumed:]
+    if not rest or (rest[0].text.startswith("(") and rest[-1].text.rstrip(":").endswith(")")):
+        return spec
+    return None
+
+
+# label prefixes that send a value to another section ("Spouse Phone", "Emergency Phone",
+# "Secondary Group Number", "Pharmacy Name"), wherever it is printed
+ROUTES = [
+    ("spouse_information", ["spouse", "partner", "husband", "wife"]),
+    ("emergency_contact", ["emergency contact", "in case of emergency", "emergency", "ice"]),
+    ("primary_insurance", ["primary insurance", "primary"]),
+    ("secondary_insurance", ["secondary insurance", "secondary"]),
+    ("preferred_pharmacy", ["preferred pharmacy", "pharmacy"]),
+]
+# what a bare prefix cannot carry into an insurance policy ("Secondary Phone" is not the insurer's)
+_GENERIC_REST = {("phone",), ("phone", "number"), ("name",), ("full", "name"), ("relationship",), ("address",),
+                 ("date",), ("dob",), ("date", "of", "birth"), ("email",), ("cell",), ("mobile",), ("insurance",),
+                 ("policy",), ("id",), ("plan",)}
+RELATIONSHIP_WORDS = {"self", "spouse", "husband", "wife", "partner", "child", "son", "daughter", "parent", "mother",
+                      "father", "guardian", "dependent", "other", "domestic partner", "employee", "life partner"}
+_CONDITION_LIST_LABEL = re.compile(r"\b(conditions?|diagnos[ie]s|problems?|illness(es)?|diseases?|medical history)\b",
+                                   re.I)
+_YES_NO_TEXT = re.compile(r"^\s*(yes|no|y|n)\b", re.I)
+_NA = {"n/a", "na", "n.a.", "not applicable", "none", "-", "--", "not provided", "none provided"}
+
+
+def _drop_words(ltoks: list[Token], n: int) -> list[Token]:
+    """The label without its first ``n`` words (as canon_tokens counts them)."""
+    out, seen = [], 0
+    for t in ltoks:
+        if seen >= n:
+            out.append(t)
+        seen += len(canon_tokens(t.text))
+    return out
 
 
 _LIST_PROMPT = re.compile(r"\b(list|please list|if yes|specify|describe|name them)\b", re.I)
@@ -291,19 +340,48 @@ class Binder:
         self.none_answers: dict[str, Attribute] = {}  # section key -> "NKDA"/"None" written in its table
         self.bound_ids: set[int] = set()  # tokens already read into an inline list
         self.below_labels: set[int] = set()  # labels printed under their value (signature blocks)
+        self.pages_by_no = {p.number: p for p in pages}
+        self.na_boxes: list = []  # labels and values of fields answered "Not applicable"
+        self._kv_cache: dict[str, list] = {}
+        self.routed: dict[str, list] = defaultdict(list)  # section key -> pairs printed elsewhere
+        self._spec_key: str | None = None
+        tables = []
+        for sec in template.sections:
+            flds = sec.get("fields")
+            if isinstance(flds, list):
+                tables.append(Template.alias_table(flds))
+            if sec.get("columns"):
+                tables.append(Template.alias_table(sec["columns"]))
+        sec_aliases = [{"key": sec["key"], "label": sec["name"], "aliases": sec.get("aliases", [])}
+                       for sec in template.sections]
+        tables.append(Template.alias_table(sec_aliases))
+        self._all_tables = tables
+        self._prefix_tables = [Template.alias_table([{"key": r, "label": r} for r in sec["relations"]])
+                               for sec in template.sections if sec.get("relations")]
+        self._question_tables = [Template.alias_table(sec["questions"]) for sec in template.sections if sec.get("questions")]
+        self._question_tables += [Template.alias_table([sec["consent"]]) for sec in template.sections if sec.get("consent")]
         # day/month order of numeric dates, decided once for the whole document
         self.date_order = infer_date_order([t.text for p in pages for t in p.tokens if t.kind == "word"])
         self.parse_order = "dmy" if self.date_order == "dmy" else "mdy"
 
     # ------------------------------------------------------------------ helpers
     def lines(self, region: Region) -> list[Line]:
-        return region_lines(region, self.lines_by_page.get(region.page, []), self.heading_ids)
+        cache = self.__dict__.setdefault("_lines_cache", {})
+        if region.region_id not in cache:
+            cache[region.region_id] = region_lines(region, self.lines_by_page.get(region.page, []), self.heading_ids)
+        return cache[region.region_id]
 
     def new_entity(self, etype: str, prefix: str, label: str, region: Region | None, group: str,
                    row: int | None = None, derived: bool = False) -> Entity:
         self.counters[prefix] += 1
         eid = f"{prefix}_{self.counters[prefix]:03d}"
-        ent = Entity(eid, etype, label, region.name if region else None, region.key if region else None,
+        key = region.key if region else None
+        if region is not None and self._spec_key and (self._spec_key in region.also or region.key.startswith("other:")):
+            key = self._spec_key  # a shared heading ("Allergies and Family History") or a value routed here
+        name = region.name if region else None
+        if region is not None and self._spec_key in region.also:
+            name = self.template.by_key[self._spec_key]["name"]
+        ent = Entity(eid, etype, label, name, key,
                      region.page if region else None, group, row=row, derived=derived,
                      region_id=region.region_id if region else None)
         self.entities[eid] = ent
@@ -325,6 +403,15 @@ class Binder:
             if low.conf < OCR_REVIEW_CONF:
                 status = "needs_review"
                 notes.append(f"OCR read '{low.text}' with low confidence ({low.conf:.2f}); confirm it against the page")
+            else:
+                # 'I' and 'l' look alike in many fonts: "Meera lyer" among capitalised words is
+                # probably "Iyer" - never trusted silently
+                alpha = [t for t in ocr_words if re.match(r"[A-Za-z]", t.text)]
+                odd = [t for t in alpha if re.fullmatch(r"l[a-z]{2,}[.,]?", t.text)]
+                if odd and len(alpha) >= 2 and all(t.text[:1].isupper() for t in alpha if t not in odd):
+                    status = "needs_review"
+                    notes.append(f"OCR read '{odd[0].text}'; a capital 'I' and a small 'l' look alike - "
+                                 f"confirm it against the page")
         return Attribute(
             value=value, field_label=label if label is not None else label_text(" ".join(t.text for t in label_tokens)),
             page=page, bbox=vb, extraction_method=method or m, confidence=conf if conf is not None else c,
@@ -355,7 +442,7 @@ class Binder:
 
     # ------------------------------------------------------------------ run
     def matched_sections(self) -> set[str]:
-        return {r.key for r in self.regions if not r.key.startswith("other:")}
+        return {k for r in self.regions for k in [r.key, *r.also] if not k.startswith("other:")}
 
     def run(self) -> "Binder":
         handlers = {"record": self.bind_record, "table": self.bind_table, "checklist": self.bind_checklist,
@@ -364,41 +451,313 @@ class Binder:
         if not self.scan:
             pat = self.template.by_key["patient_information"]["entity"]
             self.patient = self.new_entity(pat["type"], pat["prefix"], "Patient", None, pat["group"])
+        if not self.scan:
+            self._route()
         for spec in self.template.sections:
-            regions = [r for r in self.regions if r.key == spec["key"]]
+            regions = [r for r in self.regions if r.key == spec["key"] or spec["key"] in r.also]
             if regions:
                 self.sections_seen.append(spec["key"])
+            self._spec_key = spec["key"]
             handlers[spec["kind"]](spec, regions)
+        self._spec_key = None
+        if not self.scan:
+            self._loose_signatures()
         return self
+
+    # ------------------------------------------------------------------ label/value pairs
+    def kv_rows(self, region: Region):
+        """The region's field/value table rows (two columns: label, value), if it has one."""
+        if region.region_id not in self._kv_cache:
+            lines, boxes = self.lines(region), self.pages_by_no[region.page].boxes
+            kinds = {self.template.by_key[k]["kind"] for k in [region.key, *region.also] if k in self.template.by_key}
+            rows = kv_table(lines, boxes)
+            known = sum(1 for r in rows if not r.header and r.label and self.known_label(r.label))
+            if rows and not (is_kv_table(rows, self.known_label) or (kinds and not kinds & {"table"} and known >= 2)):
+                rows = []
+            if not rows:
+                # a short table (one or two rows) takes its columns from the rest of the page,
+                # and every row must then be a known field
+                cols = self.page_kv_columns(region.page)
+                if cols:
+                    short = kv_table(lines, boxes, columns=cols, min_rows=1)
+                    body = [r for r in short if not r.header and r.label]
+                    covered = sum(len(r.lines) for r in short) == len(lines)  # every line sits in the page's columns
+                    if body and (all(self.known_label(r.label) for r in body) or
+                                 (covered and all(r.value for r in body))):
+                        rows = short
+            self._kv_cache[region.region_id] = rows
+        return self._kv_cache[region.region_id]
+
+    def page_kv_columns(self, page: int):
+        cache = self.__dict__.setdefault("_kv_cols", {})
+        if page not in cache:
+            cache[page] = kv_columns(self.lines_by_page.get(page, []))
+        return cache[page]
+
+    def known_label(self, ltoks) -> bool:
+        """A left cell that names something the template knows: a field, a section, a family
+        relation ("Mother — Family history"), or a consent question ("Permission to leave voicemail")."""
+        if any(whole_label(ltoks, t) for t in self._all_tables):
+            return True
+        if len(ltoks) > 1 and re.fullmatch(r"#?\d{1,2}:?", ltoks[-1].text) and self.known_label(ltoks[:-1]):
+            return True  # "Medication 1", "Dosage 2"
+        words = canon_tokens(" ".join(t.text for t in ltoks))
+        for _, prefixes in ROUTES:  # "Primary Card Holder", "Spouse Phone"
+            for pf in prefixes:
+                pw = canon_tokens(pf)
+                if words[:len(pw)] == pw and len(words) > len(pw):
+                    rest = _drop_words(ltoks, len(pw))
+                    if rest and any(whole_label(rest, t) for t in self._all_tables):
+                        return True
+        if self._prefix_tables and any(match_aliases(ltoks, 0, t) for t in self._prefix_tables):
+            return True
+        return any(match_aliases(ltoks, i, t) for t in self._question_tables for i in range(len(ltoks)))
+
+    def pairs(self, region: Region, table) -> list[tuple]:
+        """Every (line index, line, field spec | None, label tokens, value tokens) in the
+        region: field/value table rows, labels printed under their line, and labels on a
+        line ("Label: value", values continuing on the next line)."""
+        lines = self.lines(region)
+        out = []
+        rows = self.kv_rows(region)
+        in_rows = {id(ln) for r in rows for ln in r.lines}
+        index = {id(ln): k for k, ln in enumerate(lines)}
+        for r in rows:
+            if r.header or not r.label:
+                continue
+            out.append((index[id(r.lines[0])], r.lines[0], whole_label(r.label, table), r.label, r.value))
+        for k, ln in enumerate(lines):
+            if id(ln) in in_rows:
+                continue
+            below = labels_below(lines, k, table) if not any(t.text.endswith(":") for t in ln.tokens) else []
+            for fspec, ltoks, vtoks in below:
+                self.below_labels.add(id(ltoks[0]))
+                out.append((k, ln, fspec, ltoks, vtoks))
+            if below:
+                continue
+            pairs = _parse_kv_line(ln.tokens, table)
+            for n, (fspec, ltoks, vtoks) in enumerate(pairs):
+                if vtoks and not self.scan:
+                    right = pairs[n + 1][1][0].x0 - 4 if n + 1 < len(pairs) else region.x1
+                    extra = [t for t in continuation_tokens(lines, k, vtoks, right) if id(t) not in in_rows]
+                    if extra:
+                        vtoks = vtoks + extra
+                        self.continued.update(id(t) for t in extra)
+                out.append((k, ln, fspec, ltoks, vtoks))
+        out.sort(key=lambda x: (x[0], x[3][0].x0 if x[3] else 0))
+        return out
+
+    def _route(self) -> None:
+        """Values printed under another section's heading but named for this one: "Spouse
+        Name", "Emergency Phone" in Patient Information, "Secondary Group Number" in a single
+        Insurance section, "Pharmacy Name" under "Prescription Information".  An unprefixed
+        label right after a routed one ("Relationship" after "Emergency Contact") follows it
+        when its own section has no such field."""
+        by_key = self.template.by_key
+        targets = [(k, sorted(pre, key=lambda x: -len(x))) for k, pre in ROUTES if k in by_key
+                   and by_key[k]["kind"] == "record"]
+        if not targets:
+            return
+        tabs = {k: Template.alias_table(by_key[k]["fields"]) for k, _ in targets}
+        for region in sorted(self.regions, key=lambda r: (r.page, r.top, r.x0)):
+            own_keys = [k for k in [region.key, *region.also] if k in by_key
+                        and by_key[k]["kind"] in ("record", "agreement")]
+            own_tabs = [Template.alias_table(by_key[k]["fields"]) for k in own_keys]
+            last, last_k = None, -10
+            for k, ln, _, ltoks, vtoks in self.pairs(region, []):
+                if not ltoks or not [t for t in vtoks if t.kind == "word"]:
+                    continue
+                if any(whole_label(ltoks, t) for t in own_tabs):
+                    last = None
+                    continue
+                words = canon_tokens(" ".join(t.text for t in ltoks))
+                cands = {}
+                for key, prefixes in targets:
+                    spec = whole_label(ltoks, tabs[key])
+                    if spec and any(tuple(canon_tokens(pf)) == tuple(words[:len(canon_tokens(pf))])
+                                    for pf in prefixes):
+                        cands[key] = spec  # the field's own name says where it goes ("Spouse Name")
+                        continue
+                    for pf in prefixes:
+                        pw = canon_tokens(pf)
+                        if words[:len(pw)] != pw or len(words) <= len(pw):
+                            continue
+                        rest = _drop_words(ltoks, len(pw))
+                        spec = whole_label(rest, tabs[key]) if rest else None
+                        if spec and not (key.endswith("_insurance") and tuple(words[len(pw):]) in _GENERIC_REST):
+                            cands[key] = spec
+                            break
+                if len(cands) == 1:
+                    key, spec = next(iter(cands.items()))
+                    self.routed[key].append((region, ln, spec, ltoks, vtoks))
+                    last, last_k = key, k
+                elif not cands and last and k - last_k <= 2:
+                    spec = whole_label(ltoks, tabs[last])
+                    if spec:
+                        self.routed[last].append((region, ln, spec, ltoks, vtoks))
+                        last_k = k
+        # say where routed values were found; an untitled-by-the-template section whose values all
+        # belong to one section ("Prescription Information" holding the pharmacy) is that section
+        for key, items in self.routed.items():
+            for region in {id(it[0]): it[0] for it in items}.values():
+                if key not in region.holds and key != region.key:
+                    region.holds.append(key)
+        for region in self.regions:
+            if region.key.startswith("other:") and len(region.holds) == 1:
+                key = region.holds[0]
+                filled = [x for x in self.pairs(region, []) if x[3] and [t for t in x[4] if t.kind == "word"]]
+                routed_here = [it for it in self.routed[key] if it[0] is region]
+                if filled and len(routed_here) == len(filled):
+                    region.key, region.name, region.holds = key, by_key[key]["name"], []
+                    self.routed[key] = [it for it in self.routed[key] if it[0] is not region]
 
     # ------------------------------------------------------------------ record sections
     def _kv_pairs(self, spec, regions, fields=None):
         """(region, line, field spec, label tokens, value tokens) for every label on the
-        section's lines.  A value that continues on the next line is extended with it
-        (and marked by ``self.continued``) so it is never split or dropped."""
+        section's lines, then the values routed here from other sections.  A value that
+        continues on the next line is extended with it (and marked by ``self.continued``)."""
         table = Template.alias_table(fields or spec["fields"])
         for region in regions:
-            lines = self.lines(region)
-            for k, ln in enumerate(lines):
-                below = labels_below(lines, k, table) if not any(t.text.endswith(":") for t in ln.tokens) else []
-                for fspec, ltoks, vtoks in below:
-                    self.below_labels.add(id(ltoks[0]))
-                    yield region, ln, fspec, ltoks, vtoks
-                if below:
+            for k, ln, fspec, ltoks, vtoks in self.pairs(region, table):
+                yield region, ln, fspec, ltoks, vtoks
+        for item in self.routed.get(spec["key"], []):
+            yield item
+
+    def _loose_signatures(self) -> None:
+        """A signature block inside a section that is not itself an agreement (a consent
+        preferences page ending in Printed Name / Signature / Date) is still an agreement:
+        the patient signs that section.  Its title is the section's heading."""
+        by_key = self.template.by_key
+        fset = self.template.data.get("field_sets", {}).get("agreement")
+        if not fset:
+            return
+        table = Template.alias_table(fset)
+        taken = {id(t) for e in self.entities.values() for a in e.attributes.values() for t in []}
+        bound_boxes = [(a.page, a.bbox) for e in self.entities.values() for a in e.attributes.values() if a.bbox]
+        for region in self.regions:
+            if any(by_key.get(k, {}).get("kind") == "agreement" for k in [region.key, *region.also]) or region.continued:
+                continue
+            found: dict[str, tuple] = {}
+            for k, ln, fspec, ltoks, vtoks in self.pairs(region, table):
+                words = [t for t in vtoks if t.kind == "word"]
+                if fspec is None or fspec["key"] in found or not words:
                     continue
-                pairs = _parse_kv_line(ln.tokens, table)
-                for n, (fspec, ltoks, vtoks) in enumerate(pairs):
-                    if vtoks and not self.scan:
-                        right = pairs[n + 1][1][0].x0 - 4 if n + 1 < len(pairs) else region.x1
-                        extra = continuation_tokens(lines, k, vtoks, right)
-                        if extra:
-                            vtoks = vtoks + extra
-                            self.continued.update(id(t) for t in extra)
-                    yield region, ln, fspec, ltoks, vtoks
+                if any(p == region.page and b[0] - 1 <= words[0].cx <= b[2] + 1 and b[1] - 1 <= words[0].cy <= b[3] + 1
+                       for p, b in bound_boxes):
+                    continue  # already a value of something else
+                found[fspec["key"]] = (fspec, ltoks, words)
+            if "signature" not in found:
+                continue
+            self._spec_key = None
+            title = strip_numbering(region.heading).rstrip(" :") or region.name
+            ent = self.new_entity("Agreement", "AGR", title, region, "Agreements")
+            ent.extra["agreement_key"] = region.key
+            ent.attributes["title"] = Attribute(
+                value=title, field_label=region.heading, page=region.hpage, bbox=region.heading_bbox,
+                extraction_method="section_heading", confidence=0.95, section=region.name, region_id=region.region_id,
+                order=(region.page, region.heading_bbox[1], 0))
+            for key, (fspec, ltoks, words) in found.items():
+                raw = clean(join_tokens(words))
+                if key == "signature":
+                    ent.attributes[key] = self.make_attr(raw, ltoks, words, "key_value", region, raw=raw)
+                else:
+                    ent.attributes[key] = self._value_attr(fspec, ltoks, words, region, raw)
+            ent.extra["signature_section"] = True
+
+    def _record_rows(self, spec, regions) -> list[Entity]:
+        """A table section written as labelled fields instead of a table: one record per
+        number ("Medication 1 / Dosage 1 / Prescribing Doctor 1 ...") or, without numbers,
+        one record per repetition of the row's key field ("Surgery / Year / Doctor")."""
+        espec = spec["entity"]
+        col_table = Template.alias_table(spec["columns"])
+        key_col = next(c for c in spec["columns"] if c.get("row_key"))
+        groups: list[dict] = []
+        numbered: dict[int, dict] = {}
+        for region in regions:
+            for k, ln, _, ltoks, vtoks in self.pairs(region, col_table):
+                words = [t for t in vtoks if t.kind == "word"]
+                lw = [t for t in ltoks if t.kind == "word"]
+                if not lw or not words:
+                    continue
+                idx, base = None, lw
+                if re.fullmatch(r"#?\d{1,2}:?", lw[-1].text) and len(lw) > 1:
+                    idx, base = int(re.sub(r"\D", "", lw[-1].text)), lw[:-1]
+                elif re.fullmatch(r"#?\d{1,2}[.)]", lw[0].text) and len(lw) > 1:
+                    idx, base = int(re.sub(r"\D", "", lw[0].text)), lw[1:]
+                cspec = whole_label(base, col_table)
+                if cspec is None:
+                    continue
+                item = (region, ltoks, words, cspec)
+                if idx is not None:
+                    numbered.setdefault(idx, {})[cspec["key"]] = item
+                elif not groups or cspec["key"] in groups[-1]:
+                    groups.append({cspec["key"]: item})
+                else:
+                    groups[-1][cspec["key"]] = item
+        made = []
+        for grp in [numbered[i] for i in sorted(numbered)] + groups:
+            key_item = grp.get(key_col["key"])
+            if not key_item:
+                continue
+            kraw = clean(join_tokens(key_item[2]))
+            if kraw.lower() in _NA:
+                continue
+            rowno = len(made) + 1
+            region = key_item[0]
+            ent = self.new_entity(espec["type"], espec["prefix"], kraw, region, espec["group"], row=rowno)
+            ent.extra["row_bbox"] = bbox_of([t for it in grp.values() for t in it[1] + it[2]])
+            for ckey, (reg, ltoks, words, cspec) in grp.items():
+                raw = clean(join_tokens(words))
+                if raw.lower() in _NA:
+                    continue
+                value, ok = normalise(raw, cspec.get("type", "text"), self.parse_order)
+                attr = self.make_attr(value, ltoks, words, "key_value", reg, raw=raw, row=rowno)
+                _type_notes(attr, raw, value, ok, cspec.get("type", "text"), self.date_order)
+                ent.attributes[ckey] = attr
+            missing_cols = [c for c in spec["columns"] if c.get("required") and c["key"] not in ent.attributes]
+            if missing_cols:
+                labels = ", ".join(c.get("label", c["key"]) for c in missing_cols)
+                self.add_missing("incomplete_record", ent.id, labels, f"record {rowno} has no value for: {labels}",
+                                 ent.id, region)
+            made.append(ent)
+        return made
+
+    def _text_answers(self, regions, q_table, contains=True):
+        """Questions answered in words ("Permission to leave voicemail | Yes"):
+        [(question spec, region, label tokens, value tokens, 'yes'|'no')]."""
+        out = []
+        for region in regions:
+            for k, ln, _, ltoks, vtoks in self.pairs(region, []):
+                words = [t for t in vtoks if t.kind == "word"]
+                if not ltoks or not words or any(t.kind == "checkbox" for t in vtoks):
+                    continue
+                m = _YES_NO_TEXT.match(clean(join_tokens(words)))
+                if not m:
+                    continue
+                qspec = None
+                for i in range(len(ltoks)):
+                    mm = match_aliases(ltoks, i, q_table)
+                    if mm:
+                        qspec = mm[1]
+                        break
+                if qspec:
+                    out.append((qspec, region, ltoks, words, "yes" if m.group(1).lower().startswith("y") else "no"))
+        return out
+
+    def _text_consent(self, key, label, ltoks, words, decision, region) -> Entity:
+        ent = self.new_entity("Consent", "CONS", label, region, "Consents")
+        qlabel = label_text(" ".join(t.text for t in ltoks)) or label
+        ent.attributes["topic"] = self.make_attr(label, ltoks, ltoks, "key_value", region, label=qlabel)
+        raw = clean(join_tokens(words))
+        ent.attributes["decision"] = self.make_attr(decision, ltoks, words, "key_value", region, label=qlabel, raw=raw)
+        ent.extra["consent_key"] = key
+        ent.extra["question"] = qlabel
+        return ent
 
     def bind_record(self, spec, regions):
         espec = spec["entity"]
         found: dict[str, Attribute] = {}
+        first_region = None
         for region, ln, fspec, ltoks, vtoks in self._kv_pairs(spec, regions):
             if fspec is None:
                 if vtoks and not self.scan:
@@ -420,13 +779,35 @@ class Binder:
             raw = clean(join_tokens(vtoks))
             if not raw:
                 continue
+            if raw.lower().strip() in _NA:
+                self.na_boxes += [(t.page, t.bbox) for t in list(ltoks) + list(vtoks)]
+                continue  # "Not applicable" / "N/A": the field is not filled
+            if fspec.get("type") != "yes_no" and re.fullmatch(r"(yes|no|y|n)[.!]?", raw.lower()) \
+                    and key not in ("sexually_active",) and spec.get("kind") == "record" and not spec.get("attach_to_patient"):
+                continue  # "Secondary insurance: No" answers whether there is one, it does not name it
+            if key == "policy_holder_name" and raw.lower() in RELATIONSHIP_WORDS:
+                # "Card Holder: Spouse" names the holder's relationship, not the holder
+                rspec = next((f for f in spec["fields"] if f["key"] == "policy_holder_relationship"), None)
+                if rspec and "policy_holder_relationship" not in found:
+                    found["policy_holder_relationship"] = self._value_attr(rspec, ltoks, vtoks, region, raw)
+                continue
             attr = self._value_attr(fspec, ltoks, vtoks, region, raw)
+            if fspec.get("on_patient") and not self.scan:
+                self.patient.attributes.setdefault(key, attr)  # a fact about the patient asked in this section
+                continue
             found[key] = attr
+            if region not in regions and first_region is None:
+                first_region = region
         if self.scan:
             return None
         if not found and espec["type"] != "Patient":
             return None
-        region0 = regions[0] if regions else None
+        region0 = regions[0] if regions else first_region
+        if espec["type"] == "Patient" and spec.get("attach_to_patient"):
+            # social history and similar sections describe the patient: their values join the patient
+            for k, a in found.items():
+                self.patient.attributes.setdefault(k, a)
+            return self.patient
         if espec["type"] == "Patient":
             ent = self.patient
             ent.section, ent.section_key = region0.name if region0 else None, spec["key"]
@@ -439,7 +820,7 @@ class Binder:
             first = ent.attributes.get("first_name")
             last = ent.attributes.get("last_name")
             ent.label = clean(f"{first.value if first else ''} {last.value if last else ''}") or "Patient"
-        elif espec["type"] == "InsurancePolicy":
+        elif espec["type"] == "InsurancePolicy" and region0 is not None:
             ent.attributes["policy_type"] = Attribute(
                 value=spec.get("policy_type"), field_label=f"section heading '{region0.heading}'",
                 page=region0.hpage, bbox=region0.heading_bbox, extraction_method="section_heading", confidence=0.95,
@@ -571,6 +952,8 @@ class Binder:
                 ent = self._row_entity(spec, espec, region, table, row, rowno)
                 if ent:
                     made.append(ent)
+        if not made and not self.scan and spec["key"] not in self.none_answers:
+            made = self._record_rows(spec, regions)
         if not made and not self.scan and spec["key"] not in self.none_answers and spec.get("inline_list", True):
             made = self._inline_list(spec, regions)
         none = self.none_answers.get(spec["key"])
@@ -652,30 +1035,32 @@ class Binder:
             words = norm_tokens(" ".join(t.text for t in label_toks))
             return any(words[i:i + len(a)] == a for a in aliases for i in range(len(words) - len(a) + 1))
 
+        sec_table = Template.alias_table([{"key": spec["key"], "label": spec["name"], "aliases": spec.get("aliases", [])}])
         for region in self.regions:
             own = region.region_id in own_regions
-            if not own and region.key.startswith("other:"):
-                continue
             lines = self.lines(region)
-            for k, ln in enumerate(lines):
-                if id(ln) in seen:
+            in_rows = {id(ln) for r in self.kv_rows(region) for ln in r.lines}
+            for k, ln, _, ltoks, vtoks in self.pairs(region, []):
+                words = [t for t in vtoks if t.kind == "word"]
+                if not ltoks or not words or any(t.kind == "checkbox" for t in vtoks) \
+                        or any(id(t) in self.bound_ids for t in words) or id(ln) in seen:
                     continue
-                pairs = _parse_kv_line(ln.tokens, [])
-                for n, (_, ltoks, vtoks) in enumerate(pairs):
-                    words = [t for t in vtoks if t.kind == "word"]
-                    if not words or any(t.kind == "checkbox" for t in vtoks) or any(id(t) in self.bound_ids for t in words):
-                        continue
-                    if names_section(ltoks) or (own and _LIST_PROMPT.search(" ".join(t.text for t in ltoks))):
-                        right = pairs[n + 1][1][0].x0 - 4 if n + 1 < len(pairs) else region.x1
-                        extra = [t for t in continuation_tokens(lines, k, words, right) if t.kind == "word"]
-                        found.append((region, ltoks, words + extra, True))
-                        seen.add(id(ln))
-                if own and not pairs and id(ln) not in seen:
-                    words = [t for t in ln.tokens if t.kind == "word"]
-                    text = " ".join(t.text for t in words)
-                    if words and not _INSTRUCTION.search(text) and not text.rstrip().endswith((".", ":", "?")):
-                        found.append((region, [], words, False))
-                        seen.add(id(ln))
+                exact = whole_label(ltoks, sec_table) is not None  # "Allergies | Aspirin"
+                if (region.key.startswith("other:") and not own and not exact):
+                    continue
+                if exact or names_section(ltoks) or (own and _LIST_PROMPT.search(" ".join(t.text for t in ltoks))):
+                    found.append((region, ltoks, words, True))
+                    seen.add(id(ln))
+            if not own:
+                continue
+            for k, ln in enumerate(lines):
+                if id(ln) in seen or id(ln) in in_rows or _parse_kv_line(ln.tokens, []):
+                    continue
+                words = [t for t in ln.tokens if t.kind == "word"]
+                text = " ".join(t.text for t in words)
+                if words and not _INSTRUCTION.search(text) and not text.rstrip().endswith((".", ":", "?")):
+                    found.append((region, [], words, False))
+                    seen.add(id(ln))
         made: list[Entity] = []
         espec = spec["entity"]
         key_col = next(c for c in spec["columns"] if c.get("row_key"))
@@ -781,8 +1166,8 @@ class Binder:
         index: dict[str, Entity] = {}
         for s in surgeries:
             a = s.attributes.get("facility")
-            if not a:
-                continue
+            if not a or is_place(str(a.value)):
+                continue  # "Location: Los Angeles, California" says where, not which hospital
             key = name_key(a.value)
             h = index.get(key)
             if not h:
@@ -847,6 +1232,42 @@ class Binder:
                         i = j
                         continue
                     i += 1
+        if not self.scan:
+            out += self._written_conditions(spec, regions, opt_table, {e.label.lower() for e in out})
+        return out
+
+    def _written_conditions(self, spec, regions, opt_table, have) -> list[Entity]:
+        """Conditions written as text ("Selected medical conditions | Heart disease;
+        Arthritis") instead of ticked: one condition per item, named by the option it
+        names when it names one."""
+        espec = spec["entity"]
+        out = []
+        for region in regions:
+            for k, ln, _, ltoks, vtoks in self.pairs(region, []):
+                words = [t for t in vtoks if t.kind == "word"]
+                label = " ".join(t.text for t in ltoks)
+                if not ltoks or not words or any(t.kind == "checkbox" for t in vtoks):
+                    continue
+                if not _CONDITION_LIST_LABEL.search(label) or re.search(r"\b(none|no)\b", label, re.I):
+                    continue
+                if none_answer(clean(join_tokens(words))):
+                    continue
+                for item in _list_items(words):
+                    text = clean(join_tokens(item)).strip(" ,;.")
+                    if not text or none_answer(text):
+                        continue
+                    m = whole_label(item, opt_table) or next(
+                        (o for i in range(len(item)) for o in [match_aliases(item, i, opt_table)] if o), [None, None])[1]
+                    name = m["label"] if m else text
+                    if name.lower() in have:
+                        continue
+                    have.add(name.lower())
+                    ent = self.new_entity(espec["type"], espec["prefix"], name, region, espec["group"])
+                    ent.attributes["name"] = self.make_attr(name, ltoks, item, "key_value", region, raw=text,
+                                                            label=label_text(label))
+                    ent.extra["owner_hint"] = "patient"
+                    ent.extra["option"] = m["key"] if m else "other"
+                    out.append(ent)
         return out
 
     # ------------------------------------------------------------------ family history
@@ -885,8 +1306,29 @@ class Binder:
                                             row.cells["conditions"].all_tokens if "conditions" in row.cells else [])
                     members.append(ent)
             return members
+        rows = [(region, r) for region in regions for r in self.kv_rows(region) if not r.header and r.label and r.value]
+        row_lines = {id(ln) for _, r in rows for ln in r.lines}
+        for region, r in rows:  # "Mother — Family history | Diabetes"
+            m = match_aliases(r.label, 0, relations)
+            if not m or self.scan:
+                continue
+            ltoks, vtoks = r.label, [t for t in r.value if t.kind == "word"]
+            label = label_text(join_tokens(ltoks[:m[0]]))
+            ent = self.new_entity(espec["type"], espec["prefix"], label, region, espec["group"])
+            parsed = _parse_family_text(vtoks)
+            ent.attributes["relation"] = self.make_attr(m[1]["key"], ltoks, ltoks[:m[0]], "family", region, label=label)
+            for k in ("living_status", "age", "conditions"):
+                if k in parsed:
+                    value, ptoks = parsed[k]
+                    ent.attributes[k] = self.make_attr(value, ltoks, ptoks, "family", region, label=label,
+                                                       raw=clean(" ".join(t.text for t in ptoks)))
+            self._family_conditions(ent, ent.attributes.get("conditions"), region,
+                                    parsed.get("conditions", (None, []))[1], ltoks)
+            members.append(ent)
         for region in regions:
             for ln in self.lines(region):
+                if id(ln) in row_lines:
+                    continue
                 toks = ln.tokens
                 m = match_aliases(toks, 0, relations)
                 if not m:
@@ -1007,6 +1449,12 @@ class Binder:
                         self.slot(f"{spec['key']}.{qspec['key']}.no", [b], region, qtext)
                     continue
                 out.append(self._consent(qspec["key"], qspec["label"], question, yes, no, region))
+        if not self.scan:
+            for qspec, region, ltoks, words, decision in self._text_answers(regions, q_table):
+                if qspec["key"] in done:
+                    continue
+                done.add(qspec["key"])
+                out.append(self._text_consent(qspec["key"], qspec["label"], ltoks, words, decision, region))
         return out
 
     # ------------------------------------------------------------------ release of information
@@ -1033,9 +1481,29 @@ class Binder:
                 break
             if consent:
                 break
+        if consent is None and not self.scan:
+            # "Permission to discuss medical condition with family | Yes", wherever it is printed
+            ctable = Template.alias_table([{"key": cspec["key"], "label": cspec["label"], "aliases": cspec["aliases"]}])
+            for qspec, region, ltoks, words, decision in self._text_answers(self.regions, ctable):
+                consent = self._text_consent(cspec["key"], cspec["label"], ltoks, words, decision, region)
+                break
         espec = spec["entity"]
         people = []
         rowno = 0
+        if not self.scan:
+            name_spec = next(c for c in spec["columns"] if c["key"] == "full_name")
+            named = [a for a in name_spec["aliases"] if "authori" in a or "family member" in a]
+            ptable = Template.alias_table([{**name_spec, "label": named[0], "aliases": named}]) if named else []
+            for region in (self.regions if ptable else []):
+                for k, ln, fspec, ltoks, vtoks in self.pairs(region, ptable):
+                    words = [t for t in vtoks if t.kind == "word"]
+                    raw = clean(join_tokens(words))
+                    if fspec is None or not words or raw.lower() in _NA or whole_label(ltoks, ptable) is None:
+                        continue
+                    rowno += 1
+                    ent = self.new_entity(espec["type"], espec["prefix"], raw, region, espec["group"], row=rowno)
+                    ent.attributes["full_name"] = self.make_attr(raw, ltoks, words, "key_value", region, raw=raw)
+                    people.append(ent)
         for region, table in self._tables(spec, regions):
             for row in table.rows:
                 rowno += 1
@@ -1059,7 +1527,20 @@ class Binder:
         region0 = regions[0]
         found: dict[str, tuple[Attribute, list[Token]]] = {}
         sig_labels = None
+        acks: dict[str, Attribute] = {}
         for region, ln, fspec, ltoks, vtoks in self._kv_pairs(spec, regions):
+            if fspec is None and not self.scan and ltoks and region in regions:
+                # other labelled lines of an agreement are what it acknowledges ("Financial Agreement:
+                # Acknowledged", "Articles: 1-6")
+                words = [t for t in vtoks if t.kind == "word"]
+                label = label_text(join_tokens(ltoks))
+                akey = slug(label)
+                if words and akey and akey not in acks and akey not in ("title", "signature", "date", "printed_name"):
+                    raw = clean(join_tokens(words))
+                    attr = self.make_attr(raw, ltoks, words, "key_value", region, raw=raw)
+                    attr.notes.append(f"'{label}' listed in the agreement")
+                    acks[akey] = attr
+                continue
             if fspec is None or fspec["key"] in found:
                 continue
             key = fspec["key"]
@@ -1104,6 +1585,12 @@ class Binder:
             order=(region0.page, region0.heading_bbox[1], 0))
         for k, (attr, _) in found.items():
             ent.attributes[k] = attr
+        ends = [a.bbox[3] for k, a in ent.attributes.items() if k in ("signature", "date") and a.bbox and a.page == region0.page]
+        for k, attr in acks.items():
+            # what follows the signature line (page notes, instructions) is not part of the agreement
+            if ends and attr.page == region0.page and attr.bbox and attr.bbox[1] > max(ends) + 2:
+                continue
+            ent.attributes.setdefault(k, attr)
         # drawn signature: ink on the signature line, right of its label, inside this section
         if "signature" not in ent.attributes and sig_labels:
             region, ln, ltoks, vtoks = sig_labels
@@ -1147,7 +1634,7 @@ def _type_notes(attr: Attribute, raw: str, value, ok: bool, vtype: str, date_ord
         if ocr and attr.status == "valid":
             attr.status = "needs_review"
     if not ok and vtype not in ("text", "person_name", "lower", "list"):  # marital/sex do say when unknown
-        kind = {"marital": "marital status", "sex": "sex or gender"}.get(vtype, vtype.replace("_", " "))
+        kind = {"marital": "marital status", "sex": "sex or gender", "yes_no": "yes/no answer"}.get(vtype, vtype.replace("_", " "))
         attr.notes.append(f"value '{raw}' does not look like a {kind}")
         if attr.status == "valid":
             attr.status = "needs_review"

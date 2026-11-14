@@ -13,6 +13,9 @@
                   "patient data", "personal details", "patient demographic information", "new patient information"],
       "entity": {"type": "Patient", "prefix": "PAT", "group": "Patient"},
       "fields": [
+        {"key": "patient_id", "label": "Patient ID", "type": "text",
+         "aliases": ["patient id", "patient number", "mrn", "medical record number", "medical record", "chart number",
+                     "account number", "patient account number", "record number"]},
         {"key": "full_name", "label": "Patient Name", "type": "person_name",
          "aliases": ["patient name", "full name", "name of patient", "patient full name", "name", "patient s name",
                      "legal name", "full legal name", "patient s full name"]},
@@ -106,7 +109,8 @@
         {"key": "policy_holder_name", "label": "Policy Holder Name", "type": "text",
          "aliases": ["policy holder name", "policyholder name", "subscriber name", "insured name", "policy holder",
                      "policyholder", "subscriber", "insured", "name of insured", "insured s name", "subscriber s name",
-                     "policy holder s name", "policyholder s name"]},
+                     "policy holder s name", "policyholder s name", "card holder", "cardholder", "card holder name",
+                     "cardholder name", "name on card", "subscriber full name"]},
         {"key": "policy_holder_relationship", "label": "Relationship to Patient", "type": "lower",
          "aliases": ["relationship to patient", "relationship to insured", "relationship", "relationship to subscriber",
                      "patient relationship to insured", "relationship to policy holder", "relationship to policyholder"]},
@@ -117,9 +121,15 @@
         {"key": "member_id", "label": "Insurance ID", "type": "text",
          "aliases": ["insurance id", "member id", "policy number", "subscriber id", "id number", "member number",
                      "policy id", "subscriber number", "member id number", "insurance id number", "policy", "id",
-                     "identification number", "certificate number"]},
+                     "identification number", "certificate number", "id #", "member #", "policy #", "insurance id #"]},
         {"key": "group_number", "label": "Group Number", "type": "text",
          "aliases": ["group number", "group #", "group no", "group"]},
+        {"key": "has_insurance", "label": "Do you have insurance?", "type": "yes_no", "on_patient": true,
+         "aliases": ["do you have insurance", "do you have health insurance", "do you have medical insurance",
+                     "are you insured", "insured yes no"]},
+        {"key": "has_secondary_insurance", "label": "Do you have secondary insurance?", "type": "yes_no", "on_patient": true,
+         "aliases": ["do you have secondary insurance", "do you have a secondary insurance", "do you have other insurance",
+                     "secondary insurance yes no", "any secondary insurance"]},
         {"key": "insurance_phone", "label": "Insurance Phone", "type": "phone",
          "aliases": ["insurance phone", "phone", "customer service phone", "payer phone"]}
       ]
@@ -132,6 +142,30 @@
       "aliases": ["secondary insurance", "insurance secondary", "secondary insurance information", "secondary coverage"],
       "entity": {"type": "InsurancePolicy", "prefix": "INS", "group": "Insurance policies"},
       "fields": "@primary_insurance"
+    },
+    {
+      "key": "social_history",
+      "name": "Social History",
+      "kind": "record",
+      "attach_to_patient": true,
+      "aliases": ["social history", "lifestyle", "social and lifestyle history", "lifestyle history", "habits",
+                  "social habits", "substance use"],
+      "entity": {"type": "Patient", "prefix": "PAT", "group": "Patient"},
+      "fields": [
+        {"key": "alcohol_use", "label": "Alcohol", "type": "text",
+         "aliases": ["alcohol", "alcohol use", "alcohol consumption", "do you drink alcohol", "drinking", "drinks alcohol"]},
+        {"key": "tobacco_use", "label": "Smoking", "type": "text",
+         "aliases": ["smoking", "smoker", "tobacco", "tobacco use", "do you smoke", "cigarettes", "smoking status",
+                     "tobacco smoking", "vaping"]},
+        {"key": "caffeine_use", "label": "Caffeine", "type": "text", "aliases": ["caffeine", "caffeine use", "coffee"]},
+        {"key": "drug_use", "label": "Recreational drugs", "type": "text",
+         "aliases": ["recreational drugs", "recreational drug use", "drug use", "illicit drugs", "street drugs", "drugs"]},
+        {"key": "sexually_active", "label": "Sexually Active", "type": "text", "aliases": ["sexually active"]},
+        {"key": "std_check", "label": "Wishes STD Check", "type": "text",
+         "aliases": ["wishes std check", "std check", "std testing", "std screening", "sti testing", "sti screening"]},
+        {"key": "exercise", "label": "Exercise", "type": "text", "aliases": ["exercise", "physical activity"]},
+        {"key": "diet", "label": "Diet", "type": "text", "aliases": ["diet", "special diet"]}
+      ]
     },
     {
       "key": "current_medications",
@@ -172,7 +206,8 @@
       "key": "medical_history",
       "name": "Medical History",
       "kind": "checklist",
-      "aliases": ["medical history", "medical conditions", "past medical history", "health history", "conditions"],
+      "aliases": ["medical history", "medical conditions", "past medical history", "health history", "conditions",
+                  "medical problems", "past medical problems"],
       "entity": {"type": "Condition", "prefix": "COND", "group": "Conditions"},
       "options": [
         {"key": "diabetes", "label": "Diabetes", "aliases": ["diabetes", "diabetes mellitus"]},
@@ -183,7 +218,7 @@
         {"key": "depression_anxiety", "label": "Depression/Anxiety",
          "aliases": ["depression anxiety", "depression", "anxiety", "depression or anxiety"]},
         {"key": "thyroid_disorder", "label": "Thyroid disorder", "aliases": ["thyroid disorder", "thyroid disease", "thyroid"]},
-        {"key": "arthritis", "label": "Arthritis", "aliases": ["arthritis"]}
+        {"key": "arthritis", "label": "Arthritis", "aliases": ["arthritis", "arthritis conditions", "arthritic conditions"]}
       ],
       "other_aliases": ["other", "other conditions", "other condition"]
     },
@@ -195,9 +230,15 @@
       "entity": {"type": "Surgery", "prefix": "SURG", "group": "Surgeries"},
       "columns": [
         {"key": "procedure", "label": "Procedure", "row_key": true, "required": true, "type": "text",
-         "aliases": ["procedure", "surgery", "operation", "surgery procedure", "type of surgery"]},
-        {"key": "year", "label": "Year", "type": "year", "aliases": ["year", "date", "when"]},
-        {"key": "facility", "label": "Facility", "type": "text", "aliases": ["facility", "hospital", "location", "where"]}
+         "aliases": ["procedure", "surgery", "operation", "surgery procedure", "type of surgery", "surgery hospitalization",
+                     "surgery or hospitalization", "hospitalization", "surgeries hospitalizations", "procedure surgery",
+                     "surgery name", "name of surgery"]},
+        {"key": "year", "label": "Year", "type": "year", "aliases": ["year", "date", "when", "year date", "date year",
+                                                                      "year of surgery", "date of surgery"]},
+        {"key": "facility", "label": "Facility", "type": "text", "aliases": ["facility", "hospital", "location", "where",
+                                                                              "hospital facility", "facility location"]},
+        {"key": "surgeon", "label": "Surgeon", "type": "text", "aliases": ["surgeon", "doctor", "physician", "performed by",
+                                                                           "surgeon doctor", "doctor surgeon"]}
       ]
     },
     {
@@ -224,12 +265,16 @@
       "name": "Communication Consent",
       "kind": "yes_no",
       "aliases": ["communication consent", "communication preferences", "contact preferences",
-                  "communication permissions"],
+                  "communication permissions", "hipaa consent preferences", "consent preferences", "hipaa preferences",
+                  "privacy preferences", "communication and privacy preferences", "contact consent"],
       "entity": {"type": "Consent", "prefix": "CONS", "group": "Consents"},
       "questions": [
         {"key": "voicemail", "label": "voicemail", "aliases": ["voicemail", "voice mail", "leave a message"]},
         {"key": "text_message", "label": "text message", "aliases": ["text messages", "text message", "sms", "texts"]},
-        {"key": "email", "label": "email", "aliases": ["by email", "by e-mail", "email", "e-mail"]}
+        {"key": "email", "label": "email", "aliases": ["by email", "by e-mail", "email", "e-mail"]},
+        {"key": "appointment_reminders", "label": "appointment confirmations",
+         "aliases": ["appointment confirmation", "appointment confirmations", "appointment reminder",
+                     "appointment reminders"]}
       ]
     },
     {
@@ -240,9 +285,13 @@
                   "authorization for release"],
       "entity": {"type": "AuthorizedPerson", "prefix": "AFM", "group": "Authorized persons"},
       "consent": {"key": "release_of_information", "label": "release of health information",
-                  "aliases": ["authorize release", "release of my health information", "authorize the release", "i authorize"]},
+                  "aliases": ["authorize release", "release of my health information", "authorize the release", "i authorize",
+                              "discuss medical condition with family", "discuss my medical condition",
+                              "share my health information", "discuss my health information", "release information to"]},
       "columns": [
-        {"key": "full_name", "label": "Name", "row_key": true, "type": "text", "aliases": ["name", "full name", "person"]},
+        {"key": "full_name", "label": "Name", "row_key": true, "type": "text",
+         "aliases": ["name", "full name", "person", "authorized family member", "authorized person", "authorized individual",
+                     "authorized contact", "family member authorized", "person authorized"]},
         {"key": "relationship", "label": "Relationship", "type": "lower", "aliases": ["relationship", "relation"]},
         {"key": "phone", "label": "Phone", "type": "phone", "aliases": ["phone", "phone number"]}
       ]
@@ -280,6 +329,24 @@
       "fields": "@agreement"
     },
     {
+      "key": "services_agreement",
+      "name": "Medical Services Agreement",
+      "kind": "agreement",
+      "aliases": ["medical services agreement", "services agreement", "patient services agreement", "conditions of service",
+                  "conditions of treatment", "general consent", "patient agreement", "terms of service"],
+      "entity": {"type": "Agreement", "prefix": "AGR", "group": "Agreements"},
+      "fields": "@agreement"
+    },
+    {
+      "key": "arbitration_agreement",
+      "name": "Arbitration Agreement",
+      "kind": "agreement",
+      "aliases": ["physician patient arbitration agreement", "arbitration agreement", "arbitration",
+                  "patient arbitration agreement", "physician patient arbitration"],
+      "entity": {"type": "Agreement", "prefix": "AGR", "group": "Agreements"},
+      "fields": "@agreement"
+    },
+    {
       "key": "financial_agreement",
       "name": "Financial Responsibility Agreement",
       "kind": "agreement",
@@ -292,10 +359,12 @@
   "field_sets": {
     "agreement": [
       {"key": "signature", "label": "Signature", "type": "signature",
-       "aliases": ["patient signature", "signature of patient", "signature", "signed"]},
+       "aliases": ["patient signature", "signature of patient", "signature", "signed", "patient s signature",
+                   "signature of patient or guardian", "patient guardian signature"]},
       {"key": "printed_name", "label": "Printed Name", "type": "text", "required": true,
-       "aliases": ["print name", "printed name", "name printed", "patient name printed"]},
-      {"key": "date", "label": "Date", "type": "date", "aliases": ["date signed", "date"]}
+       "aliases": ["print name", "printed name", "name printed", "patient name printed", "patient name", "name",
+                   "printed name of patient", "patient printed name"]},
+      {"key": "date", "label": "Date", "type": "date", "aliases": ["date signed", "date", "signature date", "today s date"]}
     ]
   },
   "relationship_types": {

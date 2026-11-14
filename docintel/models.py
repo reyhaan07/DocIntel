@@ -141,6 +141,8 @@ class Region:
     heading_bbox: list[float]
     continued: bool = False
     heading_page: int | None = None  # a continued region's heading is on an earlier page
+    also: list = field(default_factory=list)  # further sections one heading names ("Allergies and Family History")
+    holds: list = field(default_factory=list)  # sections whose values are printed here ("Spouse Name" in Patient Information)
 
     @property
     def hpage(self) -> int:
@@ -162,6 +164,8 @@ class Region:
             "heading_bbox": self.heading_bbox,
             "heading_page": self.hpage,
             "continued": self.continued,
+            **({"also": list(self.also)} if self.also else {}),
+            **({"holds": list(self.holds)} if self.holds else {}),
         }
 
 

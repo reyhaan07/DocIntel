@@ -135,6 +135,33 @@ MARITAL = {"single", "married", "divorced", "widowed", "widow", "widower", "sepa
            "engaged", "annulled", "other", "unknown", "s", "m", "d", "w", "prefer not to say", "registered partner"}
 
 
+US_STATES = {
+    "alabama": "AL", "alaska": "AK", "arizona": "AZ", "arkansas": "AR", "california": "CA", "colorado": "CO",
+    "connecticut": "CT", "delaware": "DE", "district of columbia": "DC", "washington dc": "DC", "florida": "FL",
+    "georgia": "GA", "hawaii": "HI", "idaho": "ID", "illinois": "IL", "indiana": "IN", "iowa": "IA", "kansas": "KS",
+    "kentucky": "KY", "louisiana": "LA", "maine": "ME", "maryland": "MD", "massachusetts": "MA", "michigan": "MI",
+    "minnesota": "MN", "mississippi": "MS", "missouri": "MO", "montana": "MT", "nebraska": "NE", "nevada": "NV",
+    "new hampshire": "NH", "new jersey": "NJ", "new mexico": "NM", "new york": "NY", "north carolina": "NC",
+    "north dakota": "ND", "ohio": "OH", "oklahoma": "OK", "oregon": "OR", "pennsylvania": "PA", "rhode island": "RI",
+    "south carolina": "SC", "south dakota": "SD", "tennessee": "TN", "texas": "TX", "utah": "UT", "vermont": "VT",
+    "virginia": "VA", "washington": "WA", "west virginia": "WV", "wisconsin": "WI", "wyoming": "WY",
+    "puerto rico": "PR", "guam": "GU", "virgin islands": "VI", "american samoa": "AS", "northern mariana islands": "MP",
+    "calif": "CA", "mass": "MA", "penn": "PA", "wash": "WA", "tex": "TX", "fla": "FL",
+}
+for _c in list(US_STATES.values()):
+    US_STATES.setdefault(_c.lower(), _c)
+US_STATES.update({k: v for k, v in {"aa": "AA", "ae": "AE", "ap": "AP", "fm": "FM", "mh": "MH", "pw": "PW"}.items()})
+
+
+def is_place(text: str) -> bool:
+    """'Los Angeles, California' / 'Dayton, OH 45402': a city and state, not a facility's name."""
+    parts = [p.strip() for p in (text or "").split(",")]
+    if len(parts) < 2:
+        return False
+    last = re.sub(r"\s*\d{5}(-\d{4})?$", "", parts[-1])
+    return norm_words(last) in US_STATES
+
+
 def norm_words(text: str) -> str:
     return " ".join(re.sub(r"[^a-z0-9]+", " ", text.lower()).split())
 
@@ -162,13 +189,24 @@ def normalise(value: str, vtype: str, date_order: str = "mdy"):
         if len(d) == 9:
             return f"{d[:3]}-{d[3:5]}-{d[5:]}", True
         return v, bool(re.fullmatch(r"(?:x{3}|\*{3})[- ]?(?:x{2}|\*{2})[- ]?\d{4}", v, re.I))  # masked: ***-**-1234
+    if vtype == "yes_no":
+        low = norm_words(v)
+        first = low.split()[0] if low else ""
+        if first in ("yes", "y", "true", "checked"):
+            return "yes", True
+        if first in ("no", "n", "false", "none"):
+            return "no", True
+        return v, False
     if vtype == "marital":
         low = norm_words(v)
         return v.lower(), low in MARITAL
     if vtype == "lower":
         return v.lower(), True
     if vtype == "state":
-        return v.upper(), bool(re.fullmatch(r"[A-Za-z]{2}", v))
+        code = US_STATES.get(norm_words(v))
+        if code:
+            return code, True
+        return v.upper(), bool(re.fullmatch(r"[A-Za-z]{2}", v)) and v.upper() in US_STATES.values()
     if vtype == "zip":
         v = v.replace(" ", "")
         return v, bool(re.fullmatch(r"\d{5}(-\d{4})?", v))
@@ -230,8 +268,8 @@ def name_key(name: str | None) -> str:
     n = (name or "").lower()
     n = re.sub(r"^/s/\s*", "", n)
     n = re.sub(r"\b(dr|mr|mrs|ms|md|do|jr|sr)\b\.?", " ", n)
-    n = re.sub(r"[^a-z ]", " ", n)
-    words = [w for w in n.split() if len(w) > 1]
+    n = re.sub(r"[^a-z0-9 ]", " ", n)
+    words = [w for w in n.split() if len(w) > 1 or w.isdigit()]
     return " ".join(words)
 
 
@@ -242,6 +280,8 @@ def same_person(a: str | None, b: str | None) -> bool:
     if ka == kb:
         return True
     wa, wb = set(ka.split()), set(kb.split())
+    if {w for w in wa if w.isdigit()} != {w for w in wb if w.isdigit()}:
+        return False  # "Provider 1" is not "Provider 2"
     return len(wa & wb) >= 2 or (ka.split()[0] == kb.split()[0] and ka.split()[-1] == kb.split()[-1])
 
 

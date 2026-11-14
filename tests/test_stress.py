@@ -272,3 +272,70 @@ def test_fill_lines_and_labels_under_the_line():
     fin = ent_by(doc, "Agreement", "Financial Responsibility Agreement")["attributes"]
     assert fin["signature"]["value"] == "ink signature" and fin["date"]["value"] == "2026-03-02"
     assert doc["summary"]["review_items"] == 0 and doc["summary"]["validation_errors"] == 0
+
+
+# --------------------------------------------------------------------------- S / T: field / value tables
+@pytest.fixture(scope="module")
+def fv():
+    return process_pdf(STRESS / "intake_S_field_value_tables.pdf", ocr=False)
+
+
+def test_field_value_tables_fill_the_record(fv):
+    assert fv["document"]["status"] == "completed" and fv["summary"]["validation_errors"] == 0
+    assert len(fv["document"]["template_sections_found"]) == 11  # every printed section is recognised
+    pat = fv["entities"]["PAT_001"]["attributes"]
+    assert (pat["first_name"]["value"], pat["last_name"]["value"], pat["date_of_birth"]["value"]) == \
+        ("Priya", "Raman", "1981-09-23")
+    assert pat["state"]["value"] == "TX" and pat["patient_id"]["value"] == "QA-204"  # "Texas"
+    assert pat["alcohol_use"]["value"] == "Yes — Occasionally"  # Social History joins the patient
+
+
+def test_prefixed_labels_go_to_their_own_record(fv):
+    # "Spouse Name / Spouse Phone" and "Emergency Contact / Relationship / Emergency Phone" sit in Patient Information
+    spouse = ent_by(fv, "Spouse", "Arjun Raman")["attributes"]
+    assert spouse["phone"]["value"] == "(555) 014-2041"
+    emc = ent_by(fv, "EmergencyContact", "Meera Iyer")["attributes"]
+    assert emc["relationship"]["value"] == "sister" and emc["phone"]["value"] == "(555) 014-2042"
+    # one "Insurance Information" table, two policies told apart by "Primary …" / "Secondary …"
+    prim = ent_by(fv, "InsurancePolicy", "Lone Star Health Plan")
+    sec = ent_by(fv, "InsurancePolicy", "Hill Country Mutual")
+    assert prim["attributes"]["member_id"]["value"] == "LSH-55821" and "group_number" in prim["attributes"]
+    assert sec["attributes"]["policy_type"]["value"] == "secondary" and "group_number" not in sec["attributes"]
+    assert rels(fv, "HELD_BY", prim["id"])[0]["object"] == "PAT_001"  # Card Holder: Self
+    assert rels(fv, "HELD_BY", sec["id"])[0]["object"] == spouse_id(fv)  # Card Holder: Spouse
+    assert rels(fv, "USES_PHARMACY", "PAT_001")
+
+
+def spouse_id(doc):
+    return next(e["id"] for e in doc["entities"].values() if e["type"] == "Spouse")
+
+
+def test_numbered_rows_shared_headings_and_signature_blocks(fv):
+    meds = {e["label"]: e for e in fv["entities"].values() if e["type"] == "Medication"}
+    assert set(meds) == {"Levothyroxine", "Albuterol inhaler"}  # "Medication 1 / Dosage 1 / Prescribing Doctor 1"
+    doctors = {fv["entities"][rels(fv, "PRESCRIBED_BY", m["id"])[0]["object"]]["label"] for m in meds.values()}
+    assert doctors == {"Dr. Sam Patel", "Dr. Lena Brooks"}
+    # "4. Allergies and Family History": one heading, two sections
+    assert {e["label"] for e in fv["entities"].values() if e["type"] == "Allergy"} == {"Penicillin", "Shellfish"}
+    assert ent_by(fv, "FamilyMember", "Father")["attributes"]["conditions"]["value"] == ["Type 2 diabetes"]
+    assert {e["label"] for e in fv["entities"].values() if e["type"] == "Condition" and e.get("owner_hint") == "patient"} \
+        == {"Asthma", "Thyroid disorder"}
+    cons = {e["consent_key"]: e["attributes"]["decision"]["value"] for e in fv["entities"].values() if e["type"] == "Consent"}
+    assert cons == {"appointment_reminders": "yes", "voicemail": "no", "release_of_information": "yes"}
+    assert rels(fv, "AUTHORIZES_RELEASE_TO", "PAT_001")
+    agrs = {e["label"]: e for e in fv["entities"].values() if e["type"] == "Agreement"}
+    assert set(agrs) == {"Medical Services Agreement", "Arbitration Agreement", "HIPAA Consent Preferences"}
+    for a in agrs.values():  # every signature and date is linked to its own section
+        assert a["attributes"]["date"]["value"] == "2026-04-18" and rels(fv, "SIGNS", "PAT_001", a["id"])
+    assert agrs["Medical Services Agreement"]["attributes"]["financial_agreement"]["value"] == "Acknowledged"
+
+
+@needs_engine
+def test_field_value_tables_scanned():
+    from docintel.evaluate import compare
+    import json
+
+    doc = process_pdf(STRESS / "scan_T_field_value_tables.pdf")
+    truth = json.loads((STRESS / "ground_truth" / "intake_S_field_value_tables.json").read_text())
+    rep = compare(doc, truth)
+    assert rep["silent_errors"] == 0 and rep["value_accuracy"] >= 0.98

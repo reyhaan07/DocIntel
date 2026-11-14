@@ -110,6 +110,22 @@ class Template:
                 return best_key
         return None
 
+    def match_sections(self, text: str) -> list[str]:
+        """Every section a combined heading names: "Allergies and Family History" ->
+        [allergies, family_history].  Each part must be a section heading by itself."""
+        t = strip_numbering(text).rstrip(" :")
+        parts = [p for p in re.split(r"\s+(?:and|&)\s+|\s*/\s*|\s*,\s*|\s+\+\s+", t, flags=re.I) if p.strip()]
+        if len(parts) < 2:
+            return []
+        keys = []
+        for part in parts:
+            k = self.match_section(part, fuzzy=False)
+            if not k:
+                return []
+            if k not in keys:
+                keys.append(k)
+        return keys
+
     # ------------------------------------------------------------------ labels
     @staticmethod
     def alias_table(specs: list[dict]) -> list[tuple[list[str], dict]]:

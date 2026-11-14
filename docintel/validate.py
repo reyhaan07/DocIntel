@@ -132,7 +132,11 @@ def validate(binder: Binder, rels: list[Relationship], template: Template, struc
     issues = []
     for p in pols:
         own = regions.get(p.region_id)
-        others = [regions[o.region_id] for o in pols if o is not p and o.region_id in regions]
+        # policies printed in one shared section are kept apart by their labels ("Primary …" / "Secondary …")
+        others = [regions[o.region_id] for o in pols if o is not p and o.region_id in regions
+                  and o.region_id != p.region_id]
+        kind = str(p.attributes["policy_type"].value).lower() if "policy_type" in p.attributes else ""
+        other_kinds = {"primary": ("secondary", "tertiary"), "secondary": ("primary", "tertiary")}.get(kind, ())
         for k, a in p.attributes.items():
             if not a.bbox or k == "policy_type":
                 continue
@@ -141,6 +145,9 @@ def validate(binder: Binder, rels: list[Relationship], template: Template, struc
             for o in others:
                 if a.page == o.page and _inside(a.bbox, o, pad=-1):
                     issues.append(issue(f"{p.id}.{k}", f"value was read from another policy's region ({o.heading})", "error"))
+            label = (a.field_label or "").lower()
+            if any(label.startswith(w) for w in other_kinds):
+                issues.append(issue(f"{p.id}.{k}", f"value labelled '{a.field_label}' belongs to another policy", "error"))
         if p.extra.get("holder_unresolved"):
             issues.append(issue(p.id, p.extra["holder_unresolved"]))
         held = [r for r in rels if r.subject == p.id and r.predicate == "HELD_BY"]
@@ -195,6 +202,11 @@ def validate(binder: Binder, rels: list[Relationship], template: Template, struc
         sig = a.attributes.get("signature")
         if sig and sig.bbox:
             checked += 1
+            if a.extra.get("signature_section"):  # a section that ends in its own signature block
+                own = regions.get(a.region_id)
+                if own is None or not _inside(sig.bbox, own):
+                    issues.append(issue(a.id, "signature lies outside the section it signs", "error"))
+                continue
             holders = [r for r in agr_regions if r.page == sig.page and _inside(sig.bbox, r)]
             if len(holders) != 1 or holders[0].region_id != a.region_id:
                 issues.append(issue(a.id, "signature is not inside exactly one agreement section", "error"))
@@ -304,6 +316,22 @@ def _cross_field(ents: dict, rels: list[Relationship], issue) -> tuple[list[dict
             checked += 1
             flag(pol, "policy_holder_relationship",
                  f"policy holder '{hname}' is the patient but the relationship is given as '{rel}'")
+
+    # "Do you have (secondary) insurance?" answered one way, the policies filled in the other
+    if pat is not None:
+        pols = [e for e in ents.values() if e.type == "InsurancePolicy"]
+        kinds = {val(p, "policy_type") for p in pols}
+        for key, kind, what in (("has_insurance", None, "insurance"), ("has_secondary_insurance", "secondary",
+                                                                         "secondary insurance")):
+            ans = val(pat, key)
+            if ans not in ("yes", "no"):
+                continue
+            checked += 1
+            present = bool(pols) if kind is None else kind in kinds
+            if ans == "no" and present:
+                flag(pat, key, f"answered 'No' to having {what}, but a {what} policy is filled in")
+            elif ans == "yes" and not present:
+                flag(pat, key, f"answered 'Yes' to having {what}, but no {what} policy details were found")
 
     # birth dates: not in the future, a plausible age, and before every signature
     today = date.today().isoformat()

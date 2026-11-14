@@ -91,6 +91,16 @@ No doctor is invented for a row that has none; the gap is reported as missing.
 | `Name: ____Ana Lopez____`, `Phone.........555-0182` | Underscores and dotted leaders are fill lines, not part of the value; leader dots separate a label from its value |
 | Signature blocks with the label under the line (`Signature of Patient`, `Date`, `Printed Name`) | Each label takes the value (or the ink) above it |
 | A sentence that resembles a heading (`I consent to treatment.`) | Not a heading: a near (fuzzy) heading match counts only when printed like a heading |
+| Every section a two-column **Field \| Value** table (practice-system exports) | Each row is a labelled field; wrapped labels stay with their row; a section with only one or two rows takes its columns from the rest of the page (headers lost in a scan are not needed) |
+| `Spouse Name`, `Emergency Phone` printed under Patient Information; `Primary …` / `Secondary …` in one Insurance section; `Pharmacy Name` under "Prescription Information" | Routed by the label to the record it names; `Relationship` right after `Emergency Contact` follows it. Policies sharing a section are kept apart by their labels |
+| `Medication 1 / Dosage 1 / Prescribing Doctor 1`, or a single `Surgery / Year / Doctor / Location` block | One record per number (or per repetition), each medication with its own dose and its own doctor |
+| `4. Allergies and Family History` | One heading, two sections: both are read from it |
+| Social history, `Do you have secondary insurance? No`, `Not applicable` | Social history joins the patient; insurance questions are kept and checked against the policies found; "Not applicable" fills nothing |
+| Yes/No written as text (`Permission to leave voicemail \| Yes`), `Selected medical conditions \| Heart disease; Arthritis` | Consents decided from the word; conditions mapped to their options |
+| A signature block at the end of a consent-preferences section, or of an agreement that lists what it acknowledges | Each block becomes that section's own agreement, signed and dated; the acknowledged items are kept on it |
+| `State: California`, `Location: Los Angeles, California` | Full state names become codes; a city and state is a location, not a hospital |
+| `Dr. Test Provider 1` and `Dr. Test Provider 2` | Different people: numbers in a name are never ignored |
+| OCR `lyer` among capitalised words | Probably `Iyer` (capital I and small l look alike): sent for review |
 | `+44 20 7946 0958`, `0049 30 1234567`, `ext. 12` | International numbers kept as written (never re-grouped as US numbers); extensions kept |
 
 ## Quick start
@@ -196,7 +206,7 @@ The stress set (`samples/stress`, `samples/stress/ground_truth`) covers the case
 
 ```
 $ python -m docintel evaluate samples/stress --truth samples/stress/ground_truth
-TOTAL                                        524   100.00%    100%       0        0
+TOTAL                                        711    99.86%    100%       0        1
 ```
 
 The number that matters most is **silent errors**: a value or link that is wrong, invented
@@ -305,6 +315,8 @@ Stress documents (`samples/stress`):
 | `scan_P_real_world.pdf` | N printed and scanned, tilted: symbol boxes and ticked choices read from the image |
 | `intake_Q_written_lists.pdf` | allergies, medications and surgeries written as lines of text, an instruction line in between |
 | `intake_R_fill_lines_signature_blocks.pdf` | values typed over underscores and leader dots, signature blocks with labels under the line, an ink-only signature |
+| `intake_S_field_value_tables.pdf` | every section a Field \| Value table: prefixed labels, one insurance section for two policies, numbered medications, a heading for two sections, social history, three signature blocks |
+| `scan_T_field_value_tables.pdf` | S printed and scanned: header rows and bold lost |
 
 ## Development
 

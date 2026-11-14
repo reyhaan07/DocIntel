@@ -80,6 +80,7 @@ class Heading:
     page: int
     name: str = ""
     generic: bool = False  # recognised by its style, not by the template
+    also: list = field(default_factory=list)  # further sections named by the same heading
 
     @property
     def x0(self):
@@ -145,7 +146,10 @@ def _generic_heading(ln: Line, prev: Line | None, style: dict) -> bool:
         return caps and (bold or bigger)
     if caps and (bold or bigger or gap_above):
         return True
-    return titled and (bold or bigger) and gap_above
+    # bold *and* larger than the text is a heading even when set tight under a table; OCR has
+    # no font weight, so there clearly larger text stands in for it
+    much_bigger = all(t.source == "ocr" for t in toks) and _median([t.height for t in toks]) >= 1.3 * style["height"]
+    return titled and ((bold and bigger) or much_bigger or ((bold or bigger) and gap_above))
 
 
 def _heading_print(words: list[Token], style: dict) -> bool:
@@ -179,9 +183,15 @@ def find_headings(lines: list[Line], template: Template, generic: bool = True) -
                 key = template.match_section(text)
                 if key and not _heading_print(words, style):
                     key = None
+            also: list[str] = []
+            if not key:
+                # one heading for two sections: "Allergies and Family History", "Spouse / Emergency Contact"
+                keys = template.match_sections(text)
+                if len(keys) >= 2 and (_heading_print(words, style) or len(segs) == 1):
+                    key, also = keys[0], keys[1:]
             if not key:
                 break
-            line_heads.append(Heading(key, text, words, ln.page, name=template.by_key[key]["name"]))
+            line_heads.append(Heading(key, text, words, ln.page, name=template.by_key[key]["name"], also=also))
         # a heading owns its whole line (or shares it only with other headings);
         # a lone matching word inside a table header row is not a heading
         if line_heads and len(line_heads) == len(segs):
@@ -233,12 +243,12 @@ def build_regions(pages: list[PageData], lines_by_page: dict[int, list[Line]], t
                 counter += 1
                 regions.append(Region(f"SEC_{counter:03d}", last_region.key, last_region.name, last_region.heading,
                                       pd.number, 0.0, 0.0, pd.width, first_top - 1, last_region.heading_bbox,
-                                      continued=True, heading_page=last_region.hpage))
+                                      continued=True, heading_page=last_region.hpage, also=list(last_region.also)))
         elif not spans and last_region is not None and page_lines:
             counter += 1
             regions.append(Region(f"SEC_{counter:03d}", last_region.key, last_region.name, last_region.heading,
                                   pd.number, 0.0, 0.0, pd.width, pd.height, last_region.heading_bbox, continued=True,
-                                  heading_page=last_region.hpage))
+                                  heading_page=last_region.hpage, also=list(last_region.also)))
         for h, x0, x1 in spans:
             bottom = pd.height
             for h2, a0, a1 in spans:
@@ -246,7 +256,7 @@ def build_regions(pages: list[PageData], lines_by_page: dict[int, list[Line]], t
                     bottom = min(bottom, h2.top - 1)
             counter += 1
             r = Region(f"SEC_{counter:03d}", h.key, h.name, h.text, pd.number, x0, h.top - 1, x1, bottom,
-                       bbox_of(h.tokens))
+                       bbox_of(h.tokens), also=list(h.also))
             regions.append(r)
         if spans:
             last = max(spans, key=lambda s: (s[0].top, s[0].x0))[0]
@@ -301,6 +311,151 @@ def match_aliases(tokens: list[Token], start: int, table) -> tuple[int, dict] | 
             if n == len(flat) or ends[n] != ends[n - 1]:
                 return consumed, spec
     return None
+
+
+# --------------------------------------------------------------------------- field / value tables
+@dataclass
+class KVRow:
+    label: list[Token]
+    value: list[Token]
+    lines: list[Line]
+    header: bool = False
+
+
+_KV_HEAD_LEFT = re.compile(r"^(field|fields|item|items|question|questions|attribute|description|label|name|"
+                           r"category|data|information|detail|details|parameter|property)$", re.I)
+_KV_HEAD_RIGHT = re.compile(r"\b(value|values|answer|answers|response|responses|entry|details|information|"
+                            r"result|data|sample|test value)\b", re.I)
+
+
+def _kv_split_lines(lines: list[Line]):
+    """(line, [label tokens, value tokens]) for lines made of a label, one wide gap and a value."""
+    two = []
+    for ln in lines:
+        toks = ln.tokens
+        if len(toks) < 2 or any(t.kind != "word" for t in toks):
+            continue
+        # the label/value split is the widest gap on the line; a second wide gap means more columns
+        gaps = [(toks[i + 1].x0 - toks[i].x1, i + 1) for i in range(len(toks) - 1)]
+        widest = max(gaps)
+        if widest[0] < 12 or sum(1 for g, _ in gaps if g >= 30) > 1:
+            continue
+        segs = [toks[:widest[1]], toks[widest[1]:]]
+
+        def label_like(t):  # OCR reads ';' as ':' - "Heart disease: Arthritis" is still one value
+            return t.text.endswith(":") and not (t.source == "ocr" and t.text[:1].islower())
+
+        if any(label_like(t) for t in segs[1]) or any(label_like(t) for t in segs[0][:-1]):
+            continue
+        two.append((ln, segs))
+    return two
+
+
+def _mode(xs):
+    best, cnt = None, 0
+    for x in xs:
+        c = sum(1 for y in xs if abs(y - x) <= 3)
+        if c > cnt:
+            best, cnt = x, c
+    return best, cnt
+
+
+def kv_columns(lines: list[Line]) -> tuple[float, float] | None:
+    """The label and value columns of field/value tables on a page (from all its lines)."""
+    two = _kv_split_lines(lines)
+    if len(two) < 3:
+        return None
+    xv, nv = _mode([segs[1][0].x0 for _, segs in two])
+    xl, nl = _mode([segs[0][0].x0 for _, segs in two])
+    if nv < 3 or nl < 3 or xv - xl < 40:
+        return None
+    return xl, xv
+
+
+def kv_table(lines: list[Line], boxes: list | None = None, columns: tuple[float, float] | None = None,
+             min_rows: int = 3) -> list[KVRow]:
+    """A two-column table of labels and their values, one field per row:
+
+        Field                     Sample test value
+        First Name                Julian
+        Permission to discuss     Yes
+        medical condition
+        with family
+
+    Found from the columns themselves: at least three lines share a label column and a
+    value column (a wide gap between them).  A row's label or value may wrap onto the
+    following lines; a drawn row box, or a tight line gap, keeps them in one row.
+    Returns the rows in order (the header row flagged), or [] when there is no such table."""
+    if len(lines) < min_rows:
+        return []
+    if columns is None:
+        columns = kv_columns(lines)
+        if columns is None:
+            return []
+    xl, xv = columns
+    two = _kv_split_lines(lines)
+    h = _median([t.height for ln, _ in two for t in ln.tokens], 8.0)
+
+    def box_of(ln):
+        for b in boxes or []:
+            if b[0] - 1 <= ln.x0 and ln.x1 <= b[2] + 1 and b[1] - 1 <= ln.cy <= b[3] + 1:
+                return b
+        return None
+
+    rows: list[KVRow] = []
+    started = False
+    for ln in lines:
+        lab = [t for t in ln.tokens if t.x0 < xv - 3]
+        val = [t for t in ln.tokens if t.x0 >= xv - 3]
+        starts_label = bool(lab) and abs(lab[0].x0 - xl) <= 3
+        starts_value = bool(val) and abs(val[0].x0 - xv) <= 3
+        fits = (not lab or starts_label) and (not val or starts_value) and \
+            not any(t.kind != "word" for t in ln.tokens) and (not lab or lab[-1].x1 < xv - 2)
+        if not fits:
+            if started:
+                break
+            continue
+        prev = rows[-1] if rows else None
+        same_row = False
+        if prev is not None:
+            last = prev.lines[-1]
+            pb, lb = box_of(last), box_of(ln)
+            if pb is not None and lb is not None:
+                same_row = pb is lb
+            else:
+                same_row = ln.top - last.bottom < 0.6 * h
+            # a continuation fills only the column(s) that wrap
+            same_row = same_row and not (lab and val and prev.value and ln.top - last.bottom >= 0.6 * h)
+        if same_row and prev is not None and (not lab or not prev.value or not val):
+            prev.label += lab
+            prev.value += val
+            prev.lines.append(ln)
+            continue
+        if not lab and val and prev is None:
+            continue
+        rows.append(KVRow(lab, val, [ln]))
+        started = True
+    if len([r for r in rows if r.label and r.value]) < min_rows:
+        return []
+    first = rows[0]
+    if first.label and first.value and (
+            (all(t.bold for t in first.label + first.value) and not all(t.bold for r in rows[1:3] for t in r.label))
+            or (_KV_HEAD_LEFT.match(join_tokens(first.label)) and _KV_HEAD_RIGHT.search(join_tokens(first.value)))):
+        first.header = True
+    return rows
+
+
+def is_kv_table(rows: list[KVRow], known_label) -> bool:
+    """A two-column table is a field/value table (not a list of records) when it says so
+    in its header, or when most of its left cells are labels: known field names, or
+    text ending in ':' or '?'."""
+    if not rows:
+        return False
+    if rows[0].header and _KV_HEAD_LEFT.match(join_tokens(rows[0].label)):
+        return True
+    body = [r for r in rows if not r.header and r.label]
+    labelish = sum(1 for r in body if known_label(r.label) or r.label[-1].text.endswith((":", "?")))
+    return bool(body) and labelish >= 0.6 * len(body)
 
 
 # --------------------------------------------------------------------------- labels under their line

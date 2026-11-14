@@ -349,6 +349,21 @@ def extract_structure(binder) -> Structure:
                         _assign(st, c.all_tokens, "table_cell")
                     used |= {k for k, l in enumerate(lines) if any(l is rl for rl in row.lines)}
                 last_table[region.key] = gt
+        # field / value tables: one labelled field per row
+        rows = binder.kv_rows(region) if hasattr(binder, "kv_rows") else []
+        if rows:
+            index = {id(ln): k for k, ln in enumerate(lines)}
+            for r in rows:
+                used |= {index[id(ln)] for ln in r.lines if id(ln) in index}
+                if r.header:
+                    _assign(st, r.label + r.value, "table_header")
+                    continue
+                if not r.label:
+                    continue
+                f = GField(region, r.label, r.value, label_text(join_tokens(r.label)), clean(join_tokens(r.value)))
+                st.fields.append(f)
+                _assign(st, r.label, "label")
+                _assign(st, r.value, "value")
         # tables
         i = 0
         while i < len(lines):
@@ -492,7 +507,7 @@ def _covered(tokens, boxes) -> bool:
 
 
 def _template_boxes(binder) -> list:
-    boxes = []
+    boxes = list(getattr(binder, "na_boxes", []))  # fields answered "Not applicable": read, nothing to keep
     for e in binder.entities.values():
         for a in e.attributes.values():
             if a.page and a.bbox:

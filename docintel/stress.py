@@ -287,7 +287,11 @@ def generate_stress(out_dir: str | Path = "samples/stress") -> list[Path]:
     make_written_lists(q)
     r = out / "intake_R_fill_lines_signature_blocks.pdf"
     make_fill_lines(r)
-    files += [f, g, h, i, j, k, enc, m, n, o, scan, q, r]
+    sv = out / "intake_S_field_value_tables.pdf"
+    make_field_value_tables(sv)
+    tv = out / "scan_T_field_value_tables.pdf"  # S printed and scanned: no header rows, no bold
+    make_scanned(sv, tv, dpi=150, seed=21, angles=[0.5, -0.4, 0.3])
+    files += [f, g, h, i, j, k, enc, m, n, o, scan, q, r, sv, tv]
     return files
 
 
@@ -533,5 +537,110 @@ def make_fill_lines(path):
     rule(X + 296, X + 446, 436)
     p.text("Signature of Patient", X, 448, size=8)
     p.text("Date", X + 296, 448, size=8)
+    c.showPage()
+    c.save()
+
+
+# --------------------------------------------------------------------------- S: field / value tables
+FV_SECTIONS = [
+    ("1. Patient Information", [
+        ("Patient ID", "QA-204"), ("First Name", "Priya"), ("Last Name", "Raman"), ("Date of Birth", "09/23/1981"),
+        ("Sex", "Female"), ("Phone", "555-014-2040"), ("Email", "priya.raman@example.com"),
+        ("Address", "27 Cedar Court"), ("City", "Austin"), ("State", "Texas"), ("ZIP Code", "78704"),
+        ("Marital Status", "Married"), ("Spouse Name", "Arjun Raman"), ("Spouse Phone", "555-014-2041"),
+        ("Emergency Contact", "Meera Iyer"), ("Relationship", "Sister"), ("Emergency Phone", "555-014-2042")]),
+    ("2. Insurance Information", [
+        ("Do you have insurance?", "Yes"), ("Primary Card Holder", "Self"),
+        ("Primary Policy Holder Name", "Priya Raman"), ("Primary Insurance Company", "Lone Star Health Plan"),
+        ("Primary ID Number", "LSH-55821"), ("Primary Group Number", "G-7710"),
+        ("Do you have secondary insurance?", "Yes"), ("Secondary Card Holder", "Spouse"),
+        ("Secondary Policy Holder Name", "Arjun Raman"), ("Secondary Insurance Company", "Hill Country Mutual"),
+        ("Secondary ID Number", "HCM-30017"), ("Secondary Group Number", "Not applicable")]),
+    ("3. Prescription Information", [("Pharmacy Name", "Cedar Court Pharmacy"), ("Pharmacy Phone", "555-014-2090")]),
+    ("4. Allergies and Family History", [
+        ("Allergies", "Penicillin; Shellfish"), ("Mother — Family history", "Hypertension"),
+        ("Father — Family history", "Type 2 diabetes")]),
+    ("5. Social History", [
+        ("Alcohol", "Yes — Occasionally"), ("Smoking", "No"), ("Caffeine", "Yes — Daily"),
+        ("Exercise", "Walking, 3 times a week")]),
+    ("6. Surgical History", [
+        ("Surgery / Hospitalization", "Tonsillectomy"), ("Year / Date", "1994"), ("Doctor", "Dr. Helen Ortiz"),
+        ("Location", "Austin, Texas")]),
+    ("7. Medical History", [("Selected medical conditions", "Asthma; Thyroid disorder")]),
+    ("8. Current Medications", [
+        ("Medication 1", "Levothyroxine"), ("Dosage 1", "50 mcg"), ("Prescribing Doctor 1", "Dr. Sam Patel"),
+        ("Medication 2", "Albuterol inhaler"), ("Dosage 2", "2 puffs"), ("Prescribing Doctor 2", "Dr. Lena Brooks")]),
+    ("9. HIPAA Consent Preferences", [
+        ("Appointment confirmation by phone/email/text", "Yes"), ("Permission to leave voicemail", "No"),
+        ("Permission to discuss medical condition with family", "Yes"), ("Authorized family member", "Arjun Raman"),
+        ("Printed Name", "Priya Raman"), ("Signature", "/s/ Priya Raman"), ("Date", "04/18/2026")]),
+    ("10. Medical Services Agreement", [
+        ("Patient Name", "Priya Raman"), ("Medical Consent", "Acknowledged"), ("Financial Agreement", "Acknowledged"),
+        ("Notice of Privacy Practices", "Acknowledged"), ("Signature", "/s/ Priya Raman"), ("Date", "04/18/2026")]),
+    ("11. Physician–Patient Arbitration Agreement", [
+        ("Patient Name", "Priya Raman"), ("Agreement", "Reviewed"), ("Patient Signature", "/s/ Priya Raman"),
+        ("Date", "04/18/2026")]),
+]
+
+
+def make_field_value_tables(path):
+    """Every section a two-column table of 'Field | Value' rows, as exported by many
+    practice systems: wrapped labels, prefixed labels ('Spouse Phone', 'Secondary ID
+    Number'), numbered medication rows, one heading for two sections, a combined
+    insurance section and three signature blocks."""
+    from reportlab.pdfbase.pdfmetrics import stringWidth
+
+    c = canvas.Canvas(str(path), pagesize=letter)
+    c.setTitle("Practice export - QA-204")
+    W, Hh = letter
+    NAVY = HexColor("#15345b")
+    LX, VX, X0, X1 = 61.0, 205.0, 57.0, 539.0
+    size = 7.4
+    lead = 8.6
+
+    def text(s, x, y, bold=False, color="#000000", sz=size):
+        c.setFont("Helvetica-Bold" if bold else "Helvetica", sz)
+        c.setFillColor(HexColor(color))
+        c.drawString(x, Hh - y, s)
+
+    def wrap(s, width):
+        words, lines, cur = s.split(), [], ""
+        for w in words:
+            t = (cur + " " + w).strip()
+            if stringWidth(t, "Helvetica", size) > width and cur:
+                lines.append(cur)
+                cur = w
+            else:
+                cur = t
+        return lines + ([cur] if cur else [])
+
+    y = 48
+    text("PRACTICE EXPORT — QA-204", X0, y, bold=True, sz=13)
+    y += 16
+    text("Generated record for quality checks. All data is fictional.", X0, y, color="#555555", sz=7.6)
+    y += 22
+    for heading, rows in FV_SECTIONS:
+        need = 34 + sum(14.6 + lead * (len(wrap(a, 128)) - 1) for a, _ in rows)
+        if y + need > Hh - 60:
+            c.showPage()
+            y = 48
+        text(heading, X0, y + 8, bold=True, sz=10.5)
+        y += 16
+        c.setFillColor(NAVY)
+        c.rect(X0, Hh - y - 14.6, X1 - X0, 14.6, stroke=0, fill=1)
+        text("Field", LX, y + 9.6, bold=True, color="#ffffff")
+        text("Value", VX, y + 9.6, bold=True, color="#ffffff")
+        y += 14.6
+        for k, (label, value) in enumerate(rows):
+            lab = wrap(label, 128)
+            h = 14.6 + lead * (len(lab) - 1)
+            c.setFillColor(HexColor("#f5f8fb" if k % 2 else "#ffffff"))
+            c.setStrokeColor(HexColor("#c9d3df"))
+            c.rect(X0, Hh - y - h, X1 - X0, h, stroke=1, fill=1)
+            for i, part in enumerate(lab):
+                text(part, LX, y + 9.6 + i * lead)
+            text(value, VX, y + 9.6)
+            y += h
+        y += 18
     c.showPage()
     c.save()

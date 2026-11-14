@@ -1,0 +1,241 @@
+{
+ "document": "scan_T_field_value_tables.pdf",
+ "document_type": "patient intake",
+ "values": {
+  "Agreement[Arbitration Agreement].agreement": "Reviewed",
+  "Agreement[Arbitration Agreement].date": "2026-04-18",
+  "Agreement[Arbitration Agreement].printed_name": "Priya Raman",
+  "Agreement[Arbitration Agreement].signature": "/s/ Priya Raman",
+  "Agreement[Arbitration Agreement].title": "Arbitration Agreement",
+  "Agreement[HIPAA Consent Preferences].date": "2026-04-18",
+  "Agreement[HIPAA Consent Preferences].printed_name": "Priya Raman",
+  "Agreement[HIPAA Consent Preferences].signature": "/s/ Priya Raman",
+  "Agreement[HIPAA Consent Preferences].title": "HIPAA Consent Preferences",
+  "Agreement[Medical Services Agreement].date": "2026-04-18",
+  "Agreement[Medical Services Agreement].financial_agreement": "Acknowledged",
+  "Agreement[Medical Services Agreement].medical_consent": "Acknowledged",
+  "Agreement[Medical Services Agreement].notice_of_privacy_practices": "Acknowledged",
+  "Agreement[Medical Services Agreement].printed_name": "Priya Raman",
+  "Agreement[Medical Services Agreement].signature": "/s/ Priya Raman",
+  "Agreement[Medical Services Agreement].title": "Medical Services Agreement",
+  "Allergy[Penicillin].allergen": "Penicillin",
+  "Allergy[Shellfish].allergen": "Shellfish",
+  "AuthorizedPerson[Arjun Raman].full_name": "Arjun Raman",
+  "Condition[Asthma].name": "Asthma",
+  "Condition[Hypertension].name": "Hypertension",
+  "Condition[Thyroid disorder].name": "Thyroid disorder",
+  "Condition[Type 2 diabetes].name": "Type 2 diabetes",
+  "Consent[appointment confirmations].decision": "yes",
+  "Consent[appointment confirmations].topic": "appointment confirmations",
+  "Consent[release of health information].decision": "yes",
+  "Consent[release of health information].topic": "release of health information",
+  "Consent[voicemail].decision": "no",
+  "Consent[voicemail].topic": "voicemail",
+  "Doctor[Dr. Lena Brooks].name": "Dr. Lena Brooks",
+  "Doctor[Dr. Sam Patel].name": "Dr. Sam Patel",
+  "EmergencyContact.full_name": "Meera Iyer",
+  "EmergencyContact.phone": "(555) 014-2042",
+  "EmergencyContact.relationship": "sister",
+  "FamilyMember[Father].conditions": [
+   "Type 2 diabetes"
+  ],
+  "FamilyMember[Father].relation": "father",
+  "FamilyMember[Mother].conditions": [
+   "Hypertension"
+  ],
+  "FamilyMember[Mother].relation": "mother",
+  "InsuranceCompany[Hill Country Mutual].name": "Hill Country Mutual",
+  "InsuranceCompany[Lone Star Health Plan].name": "Lone Star Health Plan",
+  "InsurancePolicy[Hill Country Mutual].insurance_company": "Hill Country Mutual",
+  "InsurancePolicy[Hill Country Mutual].member_id": "HCM-30017",
+  "InsurancePolicy[Hill Country Mutual].policy_holder_name": "Arjun Raman",
+  "InsurancePolicy[Hill Country Mutual].policy_holder_relationship": "spouse",
+  "InsurancePolicy[Hill Country Mutual].policy_type": "secondary",
+  "InsurancePolicy[Lone Star Health Plan].group_number": "G-7710",
+  "InsurancePolicy[Lone Star Health Plan].insurance_company": "Lone Star Health Plan",
+  "InsurancePolicy[Lone Star Health Plan].member_id": "LSH-55821",
+  "InsurancePolicy[Lone Star Health Plan].policy_holder_name": "Priya Raman",
+  "InsurancePolicy[Lone Star Health Plan].policy_holder_relationship": "self",
+  "InsurancePolicy[Lone Star Health Plan].policy_type": "primary",
+  "Medication[Albuterol inhaler].dosage": "2 puffs",
+  "Medication[Albuterol inhaler].name": "Albuterol inhaler",
+  "Medication[Albuterol inhaler].prescribing_doctor": "Dr. Lena Brooks",
+  "Medication[Levothyroxine].dosage": "50 mcg",
+  "Medication[Levothyroxine].name": "Levothyroxine",
+  "Medication[Levothyroxine].prescribing_doctor": "Dr. Sam Patel",
+  "Patient.address": "27 Cedar Court",
+  "Patient.alcohol_use": "Yes — Occasionally",
+  "Patient.caffeine_use": "Yes — Daily",
+  "Patient.city": "Austin",
+  "Patient.date_of_birth": "1981-09-23",
+  "Patient.email": "priya.raman@example.com",
+  "Patient.exercise": "Walking, 3 times a week",
+  "Patient.first_name": "Priya",
+  "Patient.full_name": "Priya Raman",
+  "Patient.has_insurance": "yes",
+  "Patient.has_secondary_insurance": "yes",
+  "Patient.last_name": "Raman",
+  "Patient.marital_status": "married",
+  "Patient.patient_id": "QA-204",
+  "Patient.phone": "(555) 014-2040",
+  "Patient.sex": "female",
+  "Patient.state": "TX",
+  "Patient.tobacco_use": "No",
+  "Patient.zip": "78704",
+  "Pharmacy[Cedar Court Pharmacy].name": "Cedar Court Pharmacy",
+  "Pharmacy[Cedar Court Pharmacy].phone": "(555) 014-2090",
+  "Spouse.full_name": "Arjun Raman",
+  "Spouse.phone": "(555) 014-2041",
+  "Surgery[Tonsillectomy].facility": "Austin, Texas",
+  "Surgery[Tonsillectomy].procedure": "Tonsillectomy",
+  "Surgery[Tonsillectomy].surgeon": "Dr. Helen Ortiz",
+  "Surgery[Tonsillectomy].year": "1994"
+ },
+ "relationships": [
+  [
+   "FamilyMember[Father]",
+   "HAS_CONDITION",
+   "Condition[Type 2 diabetes]"
+  ],
+  [
+   "FamilyMember[Mother]",
+   "HAS_CONDITION",
+   "Condition[Hypertension]"
+  ],
+  [
+   "InsurancePolicy[Hill Country Mutual]",
+   "HELD_BY",
+   "Spouse"
+  ],
+  [
+   "InsurancePolicy[Hill Country Mutual]",
+   "ISSUED_BY",
+   "InsuranceCompany[Hill Country Mutual]"
+  ],
+  [
+   "InsurancePolicy[Lone Star Health Plan]",
+   "HELD_BY",
+   "Patient"
+  ],
+  [
+   "InsurancePolicy[Lone Star Health Plan]",
+   "ISSUED_BY",
+   "InsuranceCompany[Lone Star Health Plan]"
+  ],
+  [
+   "Medication[Albuterol inhaler]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Lena Brooks]"
+  ],
+  [
+   "Medication[Levothyroxine]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Sam Patel]"
+  ],
+  [
+   "Patient",
+   "AUTHORIZES_RELEASE_TO",
+   "AuthorizedPerson[Arjun Raman]"
+  ],
+  [
+   "Patient",
+   "HAD_SURGERY",
+   "Surgery[Tonsillectomy]"
+  ],
+  [
+   "Patient",
+   "HAS_ALLERGY",
+   "Allergy[Penicillin]"
+  ],
+  [
+   "Patient",
+   "HAS_ALLERGY",
+   "Allergy[Shellfish]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[Asthma]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[Thyroid disorder]"
+  ],
+  [
+   "Patient",
+   "HAS_EMERGENCY_CONTACT",
+   "EmergencyContact"
+  ],
+  [
+   "Patient",
+   "HAS_FAMILY_HISTORY",
+   "FamilyMember[Father]"
+  ],
+  [
+   "Patient",
+   "HAS_FAMILY_HISTORY",
+   "FamilyMember[Mother]"
+  ],
+  [
+   "Patient",
+   "HAS_INSURANCE",
+   "InsurancePolicy[Hill Country Mutual]"
+  ],
+  [
+   "Patient",
+   "HAS_INSURANCE",
+   "InsurancePolicy[Lone Star Health Plan]"
+  ],
+  [
+   "Patient",
+   "HAS_SPOUSE",
+   "Spouse"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[appointment confirmations]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[release of health information]"
+  ],
+  [
+   "Patient",
+   "PROVIDES_CONSENT",
+   "Consent[voicemail]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Arbitration Agreement]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[HIPAA Consent Preferences]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Medical Services Agreement]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Albuterol inhaler]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Levothyroxine]"
+  ],
+  [
+   "Patient",
+   "USES_PHARMACY",
+   "Pharmacy[Cedar Court Pharmacy]"
+  ]
+ ]
+}
