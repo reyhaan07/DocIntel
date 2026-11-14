@@ -148,6 +148,14 @@ def _generic_heading(ln: Line, prev: Line | None, style: dict) -> bool:
     return titled and (bold or bigger) and gap_above
 
 
+def _heading_print(words: list[Token], style: dict) -> bool:
+    """Bold, capitals, larger than the body text, or read by OCR (which has no font)."""
+    letters = "".join(ch for t in words for ch in t.text if ch.isalpha())
+    return (all(t.bold for t in words) or (letters.isupper() and len(letters) > 2)
+            or _median([t.height for t in words], 0) >= 1.15 * style.get("height", 9.0)
+            or any(t.source == "ocr" for t in words))
+
+
 def find_headings(lines: list[Line], template: Template, generic: bool = True) -> list[Heading]:
     found = []
     style = _page_style(lines)
@@ -163,7 +171,14 @@ def find_headings(lines: list[Line], template: Template, generic: bool = True) -
             # a heading may end in a colon ("1. PATIENT INFORMATION:") only when it is alone on its line
             if (text.rstrip().endswith(":") and len(segs) > 1) or len(words) > 8:
                 break
-            key = template.match_section(text)
+            if re.search(r"[a-z]{2}\.$", text) and not re.search(r"\bcont\.$", text, re.I):
+                break  # a sentence ("I consent to treatment.") is not a heading
+            key = template.match_section(text, fuzzy=False)
+            if not key:
+                # a near match (an OCR typo) only counts when the words are printed like a heading
+                key = template.match_section(text)
+                if key and not _heading_print(words, style):
+                    key = None
             if not key:
                 break
             line_heads.append(Heading(key, text, words, ln.page, name=template.by_key[key]["name"]))
@@ -286,6 +301,47 @@ def match_aliases(tokens: list[Token], start: int, table) -> tuple[int, dict] | 
             if n == len(flat) or ends[n] != ends[n - 1]:
                 return consumed, spec
     return None
+
+
+# --------------------------------------------------------------------------- labels under their line
+def labels_below(lines: list[Line], k: int, table) -> list[tuple[dict, list[Token], list[Token]]]:
+    """Labels printed *under* the line they name, as in a signature block:
+
+        /s/ Ana Lopez                03/02/2026
+        Signature of Patient         Date
+
+    Every word group on line ``k`` must be a whole known label (no colon).  Each label
+    takes the words of the line just above, between its left edge and the next label;
+    that line must be close, hold no labels or sentences, and have every word taken.
+    A signature block with nothing typed above (only ink, or blank) still yields its
+    labels, with empty values, when one of them is a signature.  [(spec, label, value)]."""
+    if k <= 0 or k >= len(lines):
+        return []
+    ln = lines[k]
+    if any(t.kind != "word" or t.text.endswith(":") for t in ln.tokens):
+        return []
+    segs = segments(ln, gap=10)
+    labels = []
+    for seg in segs:
+        m = match_aliases(seg, 0, table)
+        if not m or m[0] != len(seg):
+            return []
+        labels.append((m[1], seg))
+    empty = [(spec, seg, []) for spec, seg in labels] if any(sp.get("key") == "signature" for sp, _ in labels) else []
+    prev = lines[k - 1]
+    h = _median([t.height for t in prev.tokens], 9.0)
+    if prev.page != ln.page or ln.top - prev.bottom > 1.6 * h + 4 or any(t.text.endswith(":") for t in prev.tokens):
+        return empty
+    out = []
+    for si, (spec, seg) in enumerate(labels):
+        x0 = seg[0].x0 - 12
+        x1 = labels[si + 1][1][0].x0 - 6 if si + 1 < len(labels) else 1e9
+        out.append((spec, seg, [t for t in prev.tokens if x0 <= t.x0 < x1]))
+    # every word of the line above must belong to a label, and a sentence is text, not a value
+    if sum(len(v) for _, _, v in out) != len([t for t in prev.tokens if t.kind in ("word", "checkbox")]) or any(
+            len(v) > 4 and v[-1].text.endswith(".") for _, _, v in out):
+        return empty
+    return out
 
 
 # --------------------------------------------------------------------------- multi-line values

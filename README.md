@@ -88,6 +88,9 @@ No doctor is invented for a row that has none; the gap is reported as missing.
 | A digit or word read inside a box-shaped blob (`88`) | Kept as text, never swallowed as a check box |
 | Fillable radio groups and digital-signature fields | The selected option (its printed label, or its export name when none is printed); a signed `/Sig` field is the signature (`digitally signed by …`, not cryptographically verified) |
 | `Allergies: Penicillin (hives), Sulfa (rash)`, `Medications: Lisinopril 10 mg daily; …` | A list written on a line becomes one record per item (allergen + reaction, drug + dose + frequency, procedure + year). Text under the heading without a label is read for review only; instruction lines are never read as items. On scans, a `;` read as `:` does not start a new field |
+| `Name: ____Ana Lopez____`, `Phone.........555-0182` | Underscores and dotted leaders are fill lines, not part of the value; leader dots separate a label from its value |
+| Signature blocks with the label under the line (`Signature of Patient`, `Date`, `Printed Name`) | Each label takes the value (or the ink) above it |
+| A sentence that resembles a heading (`I consent to treatment.`) | Not a heading: a near (fuzzy) heading match counts only when printed like a heading |
 | `+44 20 7946 0958`, `0049 30 1234567`, `ext. 12` | International numbers kept as written (never re-grouped as US numbers); extensions kept |
 
 ## Quick start
@@ -301,6 +304,7 @@ Stress documents (`samples/stress`):
 | `invoice_O_right_aligned.pdf` | right-aligned amounts and a two-line `Unit / Price` header |
 | `scan_P_real_world.pdf` | N printed and scanned, tilted: symbol boxes and ticked choices read from the image |
 | `intake_Q_written_lists.pdf` | allergies, medications and surgeries written as lines of text, an instruction line in between |
+| `intake_R_fill_lines_signature_blocks.pdf` | values typed over underscores and leader dots, signature blocks with labels under the line, an ink-only signature |
 
 ## Development
 

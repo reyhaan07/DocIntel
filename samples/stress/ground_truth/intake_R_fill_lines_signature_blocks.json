@@ -1,0 +1,42 @@
+{
+ "document": "intake_R_fill_lines_signature_blocks.pdf",
+ "document_type": "patient intake",
+ "values": {
+  "Agreement[Consent for Treatment].date": "2026-03-02",
+  "Agreement[Consent for Treatment].printed_name": "Ana Lopez",
+  "Agreement[Consent for Treatment].signature": "/s/ Ana Lopez",
+  "Agreement[Consent for Treatment].title": "Consent for Treatment",
+  "Agreement[Financial Responsibility Agreement].date": "2026-03-02",
+  "Agreement[Financial Responsibility Agreement].signature": "ink signature",
+  "Agreement[Financial Responsibility Agreement].title": "Financial Responsibility Agreement",
+  "EmergencyContact.full_name": "Rosa Lopez",
+  "EmergencyContact.phone": "(555) 123-9999",
+  "EmergencyContact.relationship": "mother",
+  "Patient.address": "9 Birch Lane",
+  "Patient.city": "Dayton",
+  "Patient.date_of_birth": "1990-03-14",
+  "Patient.first_name": "Ana",
+  "Patient.full_name": "Ana Lopez",
+  "Patient.last_name": "Lopez",
+  "Patient.phone": "(555) 123-4567",
+  "Patient.state": "OH",
+  "Patient.zip": "45402"
+ },
+ "relationships": [
+  [
+   "Patient",
+   "HAS_EMERGENCY_CONTACT",
+   "EmergencyContact"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Consent for Treatment]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Financial Responsibility Agreement]"
+  ]
+ ]
+}

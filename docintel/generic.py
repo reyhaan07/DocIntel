@@ -17,7 +17,7 @@ import re
 from dataclasses import dataclass, field
 
 from .layout import (Cell, Table, TableRow, bbox_of, continuation_tokens, continue_table, find_table,
-                     header_second_line, header_segments, join_tokens, segments, slug)
+                     header_second_line, header_segments, join_tokens, labels_below, segments, slug)
 from .models import Attribute, Entity, Line, Region, Relationship, Evidence, Token
 from .normalize import clean, format_phone, is_ambiguous_date, label_text, parse_date, phone_ok
 from .template import norm
@@ -92,6 +92,7 @@ class GField:
     signature_mark: object = None
     continued: bool = False
     named_by_field: bool = False  # label taken from the form field's tooltip/name, not printed
+    below: bool = False  # label printed under its value (signature block)
 
     @property
     def is_signature(self) -> bool:
@@ -269,6 +270,34 @@ def _empty_table_header(lines: list[Line], i: int, binder) -> bool:
     return bold or all(norm(tx) in known for tx in texts)
 
 
+# labels a signature block prints under its lines
+_BELOW_TABLE = None
+
+
+def _below_table():
+    global _BELOW_TABLE
+    if _BELOW_TABLE is None:
+        from .template import Template
+
+        _BELOW_TABLE = Template.alias_table([
+            {"key": "signature", "label": "Signature", "aliases": [
+                "signature", "signature of patient", "patient signature", "signature of patient or guardian",
+                "parent guardian signature", "signature of parent or guardian", "guardian signature",
+                "physician signature", "provider signature", "signature of physician", "witness signature",
+                "signature of witness", "authorized signature", "customer signature", "signed", "signature of applicant",
+                "applicant signature", "employee signature", "responsible party signature"]},
+            {"key": "date", "label": "Date", "aliases": ["date", "date signed", "today s date", "signature date"]},
+            {"key": "name", "label": "Printed Name", "aliases": [
+                "printed name", "print name", "name printed", "name", "full name", "patient name", "name of patient",
+                "witness name", "printed name of patient", "name of parent or guardian"]},
+            {"key": "title", "label": "Title", "aliases": ["title", "position", "role"]},
+            {"key": "relationship", "label": "Relationship", "aliases": [
+                "relationship", "relationship to patient", "relation to patient"]},
+            {"key": "witness", "label": "Witness", "aliases": ["witness"]},
+        ])
+    return _BELOW_TABLE
+
+
 def extract_structure(binder) -> Structure:
     """Read the template-free structure of every region (plus untitled page areas)."""
     from .bind import _parse_kv_line
@@ -323,7 +352,9 @@ def extract_structure(binder) -> Structure:
         # tables
         i = 0
         while i < len(lines):
-            gt = _generic_table(lines, region, i, boxes_by_page) if i not in used else None
+            # a signature block (values over their labels) is not a table header and its row
+            sig_block = labels_below(lines, i + 1, _below_table())
+            gt = _generic_table(lines, region, i, boxes_by_page) if i not in used and not sig_block else None
             if gt:
                 st.tables.append(gt)
                 last_table[region.key] = gt
@@ -350,6 +381,16 @@ def extract_structure(binder) -> Structure:
                 continue
             toks = [t for t in ln.tokens if id(t) not in st.roles]
             if not toks:
+                continue
+            # values whose labels are printed on the line below (a signature block)
+            below = labels_below(lines, k + 1, _below_table()) if k + 1 not in used else []
+            if below and len(toks) == len(ln.tokens) and all(id(t) not in st.roles for t in lines[k + 1].tokens):
+                for _, ltoks, vtoks in below:
+                    f = GField(region, ltoks, vtoks, label_text(join_tokens(ltoks)), clean(join_tokens(vtoks)), below=True)
+                    st.fields.append(f)
+                    _assign(st, ltoks, "label")
+                    _assign(st, vtoks, "value")
+                used.add(k + 1)
                 continue
             # questions answered with check boxes
             if any(t.kind == "checkbox" for t in toks):
@@ -423,8 +464,16 @@ def extract_structure(binder) -> Structure:
         for f in [f for f in st.fields if f.region is region and not f.raw]:
             line_cy = sum(t.cy for t in f.label_tokens) / len(f.label_tokens)
             label_end = max(t.x1 for t in f.label_tokens)
+            label_top = min(t.top for t in f.label_tokens)
+
+            def near(mk) -> bool:
+                if f.below:  # ink above the label
+                    return label_top - 40 <= mk.bottom <= label_top + 3 and mk.x1 >= f.label_tokens[0].x0 - 12 \
+                        and mk.x0 <= label_end + 40
+                return abs(mk.cy - line_cy) < 14 and mk.x0 >= label_end - 4
+
             for mk in binder.marks:
-                if mk.page == region.page and region.contains(mk) and abs(mk.cy - line_cy) < 14 and mk.x0 >= label_end - 4:
+                if mk.page == region.page and region.contains(mk) and near(mk):
                     f.signature_mark = mk
                     break
     st.tokens_total = sum(1 for p in binder.pages for t in p.tokens if t.is_content and t.kind != "placeholder")

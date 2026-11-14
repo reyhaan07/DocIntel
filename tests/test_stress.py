@@ -254,3 +254,21 @@ def test_lists_written_on_a_line():
     surg = {e["label"]: e["attributes"] for e in doc["entities"].values() if e["type"] == "Surgery"}
     assert surg["Knee arthroscopy"]["year"]["value"] == "2019" and surg["Knee arthroscopy"]["year"]["status"] == "needs_review"
     assert any("gives no Prescribing Doctor" in m["reason"] for m in doc["missing"])
+
+
+# --------------------------------------------------------------------------- R: fill lines, signature blocks
+def test_fill_lines_and_labels_under_the_line():
+    doc = process_pdf(STRESS / "intake_R_fill_lines_signature_blocks.pdf", ocr=False)
+    pat = doc["entities"]["PAT_001"]["attributes"]
+    # "Name: ____Ana Lopez____", "DOB: __03/14/1990__", "Phone.........(555) 123-4567"
+    assert (pat["first_name"]["value"], pat["last_name"]["value"]) == ("Ana", "Lopez")
+    assert pat["date_of_birth"]["value"] == "1990-03-14" and pat["phone"]["value"] == "(555) 123-4567"
+    assert pat["address"]["value"] == "9 Birch Lane"
+    cft = ent_by(doc, "Agreement", "Consent for Treatment")["attributes"]
+    # "I consent to treatment." is text, not a second heading; labels sit under their lines
+    assert len([s for s in doc["sections"] if s["key"] == "consent_for_treatment"]) == 1
+    assert (cft["signature"]["value"], cft["date"]["value"], cft["printed_name"]["value"]) == \
+        ("/s/ Ana Lopez", "2026-03-02", "Ana Lopez")
+    fin = ent_by(doc, "Agreement", "Financial Responsibility Agreement")["attributes"]
+    assert fin["signature"]["value"] == "ink signature" and fin["date"]["value"] == "2026-03-02"
+    assert doc["summary"]["review_items"] == 0 and doc["summary"]["validation_errors"] == 0

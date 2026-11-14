@@ -43,6 +43,35 @@ def _clean_text(text: str) -> str:
     return t.strip()
 
 
+_FILL = re.compile(r"_{2,}|\.{3,}|…+|·{3,}")
+
+
+def _split_fill(text: str, x0: float, x1: float) -> list[tuple[str, float, float]]:
+    """Fill lines printed as characters ("Name: ____Ana Lopez____", "Name.......Ana"):
+    the underscores or leader dots are not part of the value.  A fill run between a word
+    and more text separates a label from its value, like a colon."""
+    if not _FILL.search(text):
+        return [(text, x0, x1)]
+    n = max(1, len(text))
+    out: list[tuple[str, float, float]] = []
+    pos = 0
+    pieces = []
+    for m in _FILL.finditer(text):
+        if m.start() > pos:
+            pieces.append((pos, m.start(), True))
+        pos = m.end()
+    if pos < len(text):
+        pieces.append((pos, len(text), False))
+    for k, (a, b, before_fill) in enumerate(pieces):
+        piece = text[a:b].strip()
+        if not piece or not any(ch.isalnum() for ch in piece):
+            continue
+        if before_fill and k + 1 < len(pieces) and piece[-1].isalpha() and not piece.endswith(":"):
+            piece += ":"  # "Name.....Ana" -> "Name:" "Ana"
+        out.append((piece, x0 + (x1 - x0) * a / n, x0 + (x1 - x0) * b / n))
+    return out
+
+
 def _symbol_font(font: str) -> bool:
     f = font.lower()
     return any(k in f for k in ("dingbat", "wingding", "webding", "symbol"))
@@ -347,13 +376,13 @@ def read_pdf(path: str | Path, *, ocr: bool | str = "auto", placeholders: bool =
             tokens = []
             for w in words:
                 font = str(w.get("fontname", ""))
-                tok = Token(_clean_text(w["text"]), float(w["x0"]), float(w["top"]), float(w["x1"]),
-                            float(w["bottom"]), number, "text", bold="bold" in font.lower(),
-                            size=float(w.get("size") or 0))
-                if _symbol_font(font) and len(w["text"].strip()) == 1:
-                    tok.kind = "symbol"  # decided below by looking at the glyph
-                if tok.text:
-                    tokens.append(tok)
+                for text, wx0, wx1 in _split_fill(_clean_text(w["text"]), float(w["x0"]), float(w["x1"])):
+                    tok = Token(text, wx0, float(w["top"]), wx1, float(w["bottom"]), number, "text",
+                                bold="bold" in font.lower(), size=float(w.get("size") or 0))
+                    if _symbol_font(font) and len(w["text"].strip()) == 1:
+                        tok.kind = "symbol"  # decided below by looking at the glyph
+                    if tok.text:
+                        tokens.append(tok)
             if any(t.kind == "symbol" for t in tokens):
                 _symbol_boxes(path, number, tokens)
             pd.has_text = bool(tokens)

@@ -285,7 +285,9 @@ def generate_stress(out_dir: str | Path = "samples/stress") -> list[Path]:
     make_scanned(n, scan, seed=11, angles=[1.1, -0.8])
     q = out / "intake_Q_written_lists.pdf"
     make_written_lists(q)
-    files += [f, g, h, i, j, k, enc, m, n, o, scan, q]
+    r = out / "intake_R_fill_lines_signature_blocks.pdf"
+    make_fill_lines(r)
+    files += [f, g, h, i, j, k, enc, m, n, o, scan, q, r]
     return files
 
 
@@ -481,5 +483,55 @@ def make_written_lists(path):
     p.text("I consent to examination and treatment.", X, 374, size=8.5, color=GRAY)
     p.text("Signature: /s/ Grace Okonkwo", X, 394, size=9.5)
     p.text("Date: 05/14/2026", X + 300, 394, size=9.5)
+    c.showPage()
+    c.save()
+
+
+# --------------------------------------------------------------------------- R: fill lines, signature blocks
+def make_fill_lines(path):
+    """Values typed over underscores and dotted leaders, a consent sentence that reads
+    like a heading, and signature blocks whose labels sit under the line."""
+    c = canvas.Canvas(str(path), pagesize=letter)
+    c.setTitle("Brookside Clinic intake")
+    p = _Pen(c, "flattened", {})
+    NAVY = HexColor("#24345c")
+
+    def head(s, top):
+        p.text(s, X, top + 11, size=11, bold=True, color=NAVY)
+
+    def rule(x0, x1, y):
+        c.setStrokeColor(HexColor("#000000"))
+        c.setLineWidth(0.6)
+        c.line(x0, H - y, x1, H - y)
+
+    p.text("BROOKSIDE CLINIC", X, 56, size=15, bold=True, color=NAVY)
+    head("PATIENT INFORMATION", 74)
+    p.text("Name: ____Ana Lopez__________   DOB: __03/14/1990__", X, 110, size=9.5)
+    p.text("Phone.........(555) 123-4567", X, 126, size=9.5)
+    p.text("Address: 9 Birch Lane____________   City: Dayton   State: OH   ZIP: 45402", X, 142, size=9.5)
+
+    head("EMERGENCY CONTACT", 162)
+    p.text("Name: Rosa Lopez   Relationship: Mother   Phone: 555-123-9999", X, 196, size=9.5)
+
+    head("CONSENT FOR TREATMENT", 216)
+    p.text("I consent to treatment.", X, 250, size=9.5)
+    p.text("/s/ Ana Lopez", X + 6, 288, size=9.5)
+    p.text("03/02/2026", X + 306, 288, size=9.5)
+    rule(X, X + 246, 292)
+    rule(X + 296, X + 446, 292)
+    p.text("Signature of Patient", X, 304, size=8)
+    p.text("Date", X + 296, 304, size=8)
+    p.text("Ana Lopez", X + 6, 328, size=9.5)
+    rule(X, X + 246, 332)
+    p.text("Printed Name", X, 344, size=8)
+
+    head("FINANCIAL RESPONSIBILITY", 364)
+    p.text("I accept responsibility for charges not covered by insurance.", X, 398, size=9.5)
+    p.ink(X + 8, 414, 110, 20, seed=73)
+    p.text("03/02/2026", X + 306, 432, size=9.5)
+    rule(X, X + 246, 436)
+    rule(X + 296, X + 446, 436)
+    p.text("Signature of Patient", X, 448, size=8)
+    p.text("Date", X + 296, 448, size=8)
     c.showPage()
     c.save()

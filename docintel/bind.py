@@ -10,6 +10,7 @@ import re
 from collections import defaultdict
 
 from .layout import (Cell, Table, bbox_of, build_lines, build_regions, checkbox_options, continuation_tokens,
+                     labels_below,
                      continue_table, find_table, join_tokens, match_aliases, region_lines)
 from .models import Attribute, Entity, Line, PageData, Region, Token
 from .normalize import (clean, none_answer, split_dose_frequency, infer_date_order, is_ambiguous_date, label_text, name_key, normalise, split_list,
@@ -289,6 +290,7 @@ class Binder:
         self._unclear_lines: set[int] = set()  # yes/no lines where a box or an answer was not readable
         self.none_answers: dict[str, Attribute] = {}  # section key -> "NKDA"/"None" written in its table
         self.bound_ids: set[int] = set()  # tokens already read into an inline list
+        self.below_labels: set[int] = set()  # labels printed under their value (signature blocks)
         # day/month order of numeric dates, decided once for the whole document
         self.date_order = infer_date_order([t.text for p in pages for t in p.tokens if t.kind == "word"])
         self.parse_order = "dmy" if self.date_order == "dmy" else "mdy"
@@ -378,6 +380,12 @@ class Binder:
         for region in regions:
             lines = self.lines(region)
             for k, ln in enumerate(lines):
+                below = labels_below(lines, k, table) if not any(t.text.endswith(":") for t in ln.tokens) else []
+                for fspec, ltoks, vtoks in below:
+                    self.below_labels.add(id(ltoks[0]))
+                    yield region, ln, fspec, ltoks, vtoks
+                if below:
+                    continue
                 pairs = _parse_kv_line(ln.tokens, table)
                 for n, (fspec, ltoks, vtoks) in enumerate(pairs):
                     if vtoks and not self.scan:
@@ -1102,8 +1110,16 @@ class Binder:
             label_end = max(t.x1 for t in ltoks)
             nxt = [t.x0 for t in ln.tokens if t.x0 > label_end + 4 and t.kind == "word"]
             limit = min(nxt) if nxt else region.x1
+            below = id(ltoks[0]) in self.below_labels
+
+            def on_line(m) -> bool:
+                if below:  # ink above the label, over its column
+                    return (ln.top - 40 <= m.bottom <= ln.top + 3 and m.x1 >= ltoks[0].x0 - 12
+                            and m.x0 < (min(nxt) if nxt else region.x1))
+                return abs(m.cy - ln.cy) < 14 and m.x0 >= label_end - 4 and m.x0 < limit
+
             for m in self.marks:
-                if m.page == region.page and region.contains(m) and abs(m.cy - ln.cy) < 14 and m.x0 >= label_end - 4 and m.x0 < limit:
+                if m.page == region.page and region.contains(m) and on_line(m):
                     ent.attributes["signature"] = Attribute(
                         value="ink signature", field_label=label_text(" ".join(t.text for t in ltoks)), page=m.page,
                         bbox=m.bbox, label_bbox=bbox_of(ltoks), extraction_method="layout_signature",
