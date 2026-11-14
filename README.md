@@ -264,7 +264,31 @@ FUNSD's faxed 1980s forms (handwriting, stamps, 100 dpi scans, labels without co
 remain hard for any reader without a template. The silent errors left there are the
 work still ahead: each one is a case where docintel cannot yet see its own doubt.
 
-## Document types and templates
+## Document types and key facts
+
+Every document gets a type from the words on its first page (headings count most), with
+the words that decided it in `document_type_basis`. 26 types are known: invoice, receipt,
+bank statement, payslip, utility bill, lab report, prescription, discharge summary,
+purchase order, contract, letter, memo, e-mail, resume, meeting minutes, insurance, tax
+form, referral, questionnaire, scientific publication, report, specification, budget,
+news article, advertisement, presentation and form (see `docintel/profiles.py`).
+
+For types with key facts, `key_facts` names them with their source:
+
+```json
+"key_facts": {
+  "invoice_number": {"value": "INV-20931", "label": "Invoice Number", "method": "labelled value", "status": "valid", "page": 1, "bbox": [...]},
+  "total":          {"value": "$307.80",   "label": "Total Due",      "method": "labelled value", "status": "valid", ...}
+}
+```
+
+A fact comes from a labelled value first; then from a line that starts with the fact's
+name and ends with a value of its kind (`TOTAL   9.00` on a receipt); the issuer (merchant,
+seller) from the document's first line when it names an organisation. Conflicting values,
+or a guess from a weaker rule, go to review. The type is only a label: nothing is read
+differently because of it.
+
+## Templates
 
 `docintel/templates/patient_intake_v1.json` describes the patient-intake type: sections and
 the headings they may be printed under, field labels, table columns, and the

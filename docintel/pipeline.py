@@ -392,4 +392,8 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
         doc["summary"]["fields_filled"] = std["fields_filled"]
         doc["summary"]["fields_withheld"] = std["fields_withheld"]
     doc["document"]["processing_ms"] = int((time.perf_counter() - t0) * 1000)
+    if not template_used:
+        from .profiles import key_facts
+
+        doc["key_facts"] = key_facts(doc)
     return doc

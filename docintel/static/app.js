@@ -228,10 +228,26 @@ function entityCard(e) {
     </article>`;
 }
 
+function keyFacts() {
+  const kf = S.doc.key_facts || {};
+  const names = Object.keys(kf);
+  if (!names.length) return "";
+  const m = S.doc.document;
+  let h = `<div class="grouphead">Key facts · ${esc(m.document_type || "document")}</div>`;
+  for (const k of names) {
+    const f = kf[k];
+    const sel = f.entity && f.attribute ? `data-sel="attr:${f.entity}:${f.attribute}"` : "";
+    h += `<div class="blk bf" ${sel} title="${esc(f.method)}${f.notes && f.notes.length ? " · " + esc(f.notes.join("; ")) : ""}">
+      <span class="lab">${esc(k.replace(/_/g, " "))}</span><span class="v">${esc(f.value)}</span>
+      <span class="subtle"> ← ${esc(f.label || "")}</span>${f.status !== "valid" ? ` <span class="badge needs_review">review</span>` : ""}</div>`;
+  }
+  return h;
+}
+
 function tabDocument() {
   const blocks = S.doc.blocks || [];
   if (!blocks.length) return `<div class="nothing">No text was read from this document.</div>`;
-  let page = null, h = "";
+  let page = null, h = keyFacts();
   for (const b of blocks) {
     if (b.page !== page) { page = b.page; h += `<div class="grouphead">Page ${page}</div>`; }
     const sel = `data-sel="blk:${b.block_id}"`;

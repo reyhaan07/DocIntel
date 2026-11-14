@@ -1002,6 +1002,11 @@ def blocks_to_markdown(doc: dict) -> str:
     """A readable Markdown rendering of the reading-order blocks."""
     d = doc["document"]
     out = [f"<!-- {d['filename']} - {d.get('document_type') or 'document'} - read by docintel -->", ""]
+    kf = doc.get("key_facts") or {}
+    if kf:
+        out += ["| key fact | value | printed as |", "|---|---|---|"]
+        out += [f"| {k.replace('_', ' ')} | {str(f['value']).replace('|', '/')} | {f.get('label') or ''} |" for k, f in kf.items()]
+        out.append("")
     page = None
     for b in doc.get("blocks", []):
         if b["page"] != page:
@@ -1054,26 +1059,14 @@ DOC_KEYWORDS = {
 
 
 def guess_document_type(binder) -> tuple[str, str] | None:
-    """(type, basis) from the words on the first page, or None when nothing names it."""
-    from .template import norm
+    """(type, basis) from the words on the first page (see profiles.py), or None when
+    nothing names the document's kind."""
+    from .profiles import classify
 
     first = [p for p in binder.pages if p.number == 1]
-    body = " " + norm(" ".join(t.text for p in first for t in p.tokens if t.kind == "word")) + " "
-    heads = " " + norm(" ".join(r.heading for r in binder.regions if r.page == 1 and r.heading)) + " "
-    best, basis = None, []
-    best_score = 0
-    for dtype, words in DOC_KEYWORDS.items():
-        score, found = 0, []
-        for w in words:
-            k = " " + norm(w) + " "
-            if k in heads:
-                score += 3
-                found.append(w)
-            elif k in body:
-                score += 1
-                found.append(w)
-        if score > best_score:
-            best, best_score, basis = dtype, score, found
-    if best is None or best_score < 2:
-        return None
-    return best, "words on page 1: " + ", ".join(f"'{w}'" for w in basis[:4])
+    words = [t for p in first for t in p.tokens if t.kind == "word"]
+    body = " ".join(t.text for t in words)
+    heads = " ".join(r.heading for r in binder.regions if r.page == 1 and r.heading)
+    labels = sum(1 for t in words if t.text.endswith(":") and len(t.text) > 2)
+    dtype, basis, _ = classify(heads, body, n_fields=labels, n_words=len(words))
+    return (dtype, basis) if dtype else None
