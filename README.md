@@ -241,7 +241,7 @@ half (failures inspected, causes fixed) and a held-out half (only measured). See
 | … table cells correct | 3.4 % | 100 % |
 | … words of the text read | 97.8 % | 98.8 % |
 | … **silent errors** | 42 | 1 |
-| FUNSD, 50 noisy scanned forms: label → value links stated correctly (precision) | 52.1 % | 58.4 % |
+| FUNSD, 50 noisy scanned forms: label → value links stated correctly (precision) | 52.1 % | 58.8 % |
 | … links found (recall) | 20.5 % | 22.5 % |
 | … **silent errors** | 88 | 80 |
 
