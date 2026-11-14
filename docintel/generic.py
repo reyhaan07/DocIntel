@@ -222,9 +222,17 @@ def _generic_table(lines: list[Line], region: Region, start: int, binder_boxes: 
         gaps.append(gap)
         rows.append(row)
         prev_bottom = max(l.bottom for l in row.lines)
-    # lines after the table that fill one column only ("Totals", a closing line) are not rows
-    while rows and sum(1 for c in rows[-1].cells.values() if c.text) <= 1 and len(rows) > 1:
-        rows.pop()
+    # a line after the table that fills one column only and stands apart from the rows
+    # ("Totals") is not a row; an empty record set like the others ("Sibling") is
+    while len(rows) > 2 and sum(1 for c in rows[-1].cells.values() if c.text) <= 1:
+        tops = [min(l.top for l in r.lines) for r in rows]
+        bots = [max(l.bottom for l in r.lines) for r in rows]
+        gaps_ = sorted(tops[k + 1] - bots[k] for k in range(len(rows) - 2))
+        typical = gaps_[len(gaps_) // 2] if gaps_ else 8.0
+        if tops[-1] - bots[-2] > 1.3 * typical + 2:
+            rows.pop()
+        else:
+            break
     if not rows:
         return None
     # a table holds records: several rows that fill more than one column.  Rows of single
