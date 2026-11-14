@@ -1,0 +1,122 @@
+{
+ "document": "scan_P_real_world.pdf",
+ "document_type": "patient intake",
+ "values": {
+  "Agreement[Consent for Treatment].date": "2026-03-02",
+  "Agreement[Consent for Treatment].printed_name": "Linh Nguyen",
+  "Agreement[Consent for Treatment].signature": "ink signature",
+  "Agreement[Consent for Treatment].title": "Consent for Treatment",
+  "Agreement[Privacy Practices Acknowledgment].date": "2026-03-02",
+  "Agreement[Privacy Practices Acknowledgment].signature": "/s/ David Nguyen",
+  "Agreement[Privacy Practices Acknowledgment].title": "Privacy Practices Acknowledgment",
+  "Condition[Asthma].name": "Asthma",
+  "Condition[High cholesterol].name": "High cholesterol",
+  "Doctor[Dr. Maria Lopez].name": "Dr. Maria Lopez",
+  "EmergencyContact.full_name": "Linh Nguyen",
+  "EmergencyContact.phone": "(312) 555-0148",
+  "EmergencyContact.relationship": "wife",
+  "InsuranceCompany[Prairie Health Plan].name": "Prairie Health Plan",
+  "InsurancePolicy[Prairie Health Plan].group_number": "G-551",
+  "InsurancePolicy[Prairie Health Plan].insurance_company": "Prairie Health Plan",
+  "InsurancePolicy[Prairie Health Plan].member_id": "PHP-77120-03",
+  "InsurancePolicy[Prairie Health Plan].policy_holder_dob": "1975-02-28",
+  "InsurancePolicy[Prairie Health Plan].policy_holder_name": "Nguyen, David T.",
+  "InsurancePolicy[Prairie Health Plan].policy_holder_relationship": "self",
+  "InsurancePolicy[Prairie Health Plan].policy_type": "primary",
+  "Medication[Losartan].dosage": "50 mg",
+  "Medication[Losartan].frequency": "once daily",
+  "Medication[Losartan].name": "Losartan",
+  "Medication[Losartan].prescribing_doctor": "Dr. Maria Lopez",
+  "Medication[Losartan].reason": "Blood pressure",
+  "Medication[Metoprolol].dosage": "25 mg",
+  "Medication[Metoprolol].frequency": "twice daily",
+  "Medication[Metoprolol].name": "Metoprolol",
+  "Medication[Metoprolol].prescribing_doctor": "Dr. Maria Lopez",
+  "Medication[Metoprolol].reason": "Heart rate",
+  "Patient.address": "88 Lakeshore Drive",
+  "Patient.allergies_status": "no known drug allergies",
+  "Patient.city": "Chicago",
+  "Patient.date_of_birth": "1975-02-28",
+  "Patient.first_name": "David",
+  "Patient.full_name": "Nguyen, David T.",
+  "Patient.last_name": "Nguyen",
+  "Patient.marital_status": "married",
+  "Patient.middle_name": "T",
+  "Patient.phone": "(312) 555-0147",
+  "Patient.preferred_language": "Vietnamese",
+  "Patient.sex": "male",
+  "Patient.ssn": "900-12-3456",
+  "Patient.state": "IL",
+  "Patient.zip": "60611",
+  "Pharmacy[Walgreens #4471].address": "22 Main Street, Chicago",
+  "Pharmacy[Walgreens #4471].name": "Walgreens #4471",
+  "Pharmacy[Walgreens #4471].phone": "(312) 555-0190"
+ },
+ "relationships": [
+  [
+   "EmergencyContact",
+   "SIGNS",
+   "Agreement[Consent for Treatment]"
+  ],
+  [
+   "InsurancePolicy[Prairie Health Plan]",
+   "HELD_BY",
+   "Patient"
+  ],
+  [
+   "InsurancePolicy[Prairie Health Plan]",
+   "ISSUED_BY",
+   "InsuranceCompany[Prairie Health Plan]"
+  ],
+  [
+   "Medication[Losartan]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Maria Lopez]"
+  ],
+  [
+   "Medication[Metoprolol]",
+   "PRESCRIBED_BY",
+   "Doctor[Dr. Maria Lopez]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[Asthma]"
+  ],
+  [
+   "Patient",
+   "HAS_CONDITION",
+   "Condition[High cholesterol]"
+  ],
+  [
+   "Patient",
+   "HAS_EMERGENCY_CONTACT",
+   "EmergencyContact"
+  ],
+  [
+   "Patient",
+   "HAS_INSURANCE",
+   "InsurancePolicy[Prairie Health Plan]"
+  ],
+  [
+   "Patient",
+   "SIGNS",
+   "Agreement[Privacy Practices Acknowledgment]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Losartan]"
+  ],
+  [
+   "Patient",
+   "TAKES_MEDICATION",
+   "Medication[Metoprolol]"
+  ],
+  [
+   "Patient",
+   "USES_PHARMACY",
+   "Pharmacy[Walgreens #4471]"
+  ]
+ ]
+}

@@ -279,7 +279,11 @@ def generate_stress(out_dir: str | Path = "samples/stress") -> list[Path]:
     make_real_world(n)
     o = out / "invoice_O_right_aligned.pdf"
     make_right_aligned_invoice(o)
-    files += [f, g, h, i, j, k, enc, m, n, o]
+    from .samples import make_scanned
+
+    scan = out / "scan_P_real_world.pdf"  # N on paper: symbol boxes and choices read from the image
+    make_scanned(n, scan, seed=11, angles=[1.1, -0.8])
+    files += [f, g, h, i, j, k, enc, m, n, o, scan]
     return files
 
 

@@ -173,6 +173,10 @@ def choice_value(vtoks: list[Token]):
     Every doubt is a problem for review: several ticks, a tick without a readable option,
     or words that belong to no option."""
     lead, opts, trailing = checkbox_options(vtoks)
+    # a fillable radio option with no printed label is named by its export value ("Male")
+    opts = [(b, lab or ([Token(b.hint, b.x1 + 1, b.top, b.x1 + 1 + 5 * len(b.hint), b.bottom, b.page, "form_field",
+                                hint="export value")] if b.hint and b.source == "form_field" else []))
+            for b, lab in opts]
     ticked = [(b, lab) for b, lab in opts if b.checked]
     problems: list[str] = []
     names = ", ".join(clean(join_tokens(lab)) or "?" for _, lab in opts)

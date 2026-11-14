@@ -199,6 +199,7 @@ def find_checkboxes(arr, tokens: list[Token], page: int) -> tuple[list[Token], l
     grid, step = _grid(arr, SCALE * 0.5, thresh=200)  # 0.5 pt cells; printed boxes are often light gray
     pt = step / SCALE
     boxes, drop = [], []
+    cands: list[tuple[Token, list[Token], bool]] = []
     for r0, c0, r1, c1, n in _components(grid, 20):
         # trim speckles that stick out of the outline (sparse edge rows/columns)
         for _ in range(3):
@@ -211,7 +212,7 @@ def find_checkboxes(arr, tokens: list[Token], page: int) -> tuple[list[Token], l
             if r1 - r0 > 4 and grid[r1, c0:c1 + 1].mean() < 0.3:
                 r1 -= 1
         w, h = (c1 - c0 + 1) * pt, (r1 - r0 + 1) * pt
-        if not (8 <= w <= 16 and 8 <= h <= 16 and abs(w - h) <= 2.5):
+        if not (6 <= w <= 16 and 6 <= h <= 16 and abs(w - h) <= 2.5):
             continue
         sub = grid[r0:r1 + 1, c0:c1 + 1]
         # a box has four (nearly) complete sides; letters do not.  Two cells of
@@ -226,7 +227,10 @@ def find_checkboxes(arr, tokens: list[Token], page: int) -> tuple[list[Token], l
         covering = [t for t in tokens if t.kind == "word"
                     and (min(x1, t.x1) - max(x0, t.x0)) > 0 and (min(bottom, t.bottom) - max(top, t.top)) > 0
                     and (min(x1, t.x1) - max(x0, t.x0)) * (min(bottom, t.bottom) - max(top, t.top)) > 0.3 * area]
-        if any(len(re.sub(r"[^A-Za-z0-9]", "", t.text)) > 2 for t in covering):
+        # ... and neither is a number or word OCR read there ("88", "IL"): two letters or digits
+        # are text unless the reading itself looks like a printed box ("[X]", "[]")
+        if any(len(re.sub(r"[^A-Za-z0-9]", "", t.text)) >= 2 and not re.search(r"[\[\]|]", t.text)
+               for t in covering):
             continue
         # tokens OCR produced from the box itself ("O", "0", "[]", "X)" ...)
         inside = [t for t in covering if x0 - 1 <= t.cx <= x1 + 1 and top - 1 <= t.cy <= bottom + 1]
@@ -235,9 +239,17 @@ def find_checkboxes(arr, tokens: list[Token], page: int) -> tuple[list[Token], l
         interior = arr[Y0:Y1, X0:X1]
         ratio = float((interior < 140).mean()) if interior.size else 0.0
         checked = ratio > 0.05
+        solid = float(sub.mean()) > 0.85  # a filled square: a tick ■, or just a bullet
+        cands.append((Token("[X]" if checked else "[ ]", x0, top, x1, bottom, page, "ocr", kind="checkbox",
+                            checked=checked, conf=0.85), inside, solid))
+    # a filled square is a ticked box only on a page that also has empty boxes of its size;
+    # on its own it is a bullet point
+    for tok, inside, solid in cands:
+        if solid and not any(not s2 and not t2.checked and abs(t2.width - tok.width) <= 2 and abs(t2.height - tok.height) <= 2
+                             for t2, _, s2 in cands):
+            continue
         drop.extend(inside)
-        boxes.append(Token("[X]" if checked else "[ ]", x0, top, x1, bottom, page, "ocr", kind="checkbox",
-                           checked=checked, conf=0.85))
+        boxes.append(tok)
     return boxes, drop
 
 

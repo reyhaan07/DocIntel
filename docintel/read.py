@@ -58,9 +58,12 @@ def _symbol_boxes(pdf_path: Path, number: int, tokens: list[Token]) -> None:
     img = render_page_gray(pdf_path, number, scale=scale)
     px = img.load()
     W, H = img.size
+    found: list[tuple[Token, tuple]] = []
+    solid: dict[int, bool] = {}
     for t in tokens:
         if t.kind != "symbol":
             continue
+        original = (t.text, t.x0, t.x1)
         size = t.size or (t.bottom - t.top)
         # some fonts report no advance width for a glyph; look one em wide instead
         x1 = max(t.x1, t.x0 + 0.9 * size)
@@ -81,6 +84,14 @@ def _symbol_boxes(pdf_path: Path, number: int, tokens: list[Token]) -> None:
         t.kind = "checkbox"
         t.x0, t.x1 = min(xs) / scale, (max(xs) + 1) / scale  # the drawn box, not the font's advance
         t.text = "[X]" if t.checked else "[ ]"
+        solid[id(t)] = len(ink) / max(1.0, (max(xs) - min(xs) + 1) * (max(ys) - min(ys) + 1)) > 0.85
+        found.append((t, original))
+    # a filled square is a ticked box only on a page that also prints empty boxes of its
+    # size; on its own it is a bullet point and stays a word
+    for t, original in found:
+        if solid[id(t)] and not any(not o.checked and not solid[id(o)] and abs(o.width - t.width) <= 2
+                                    and abs(o.height - t.height) <= 2 for o, _ in found):
+            t.kind, t.checked, t.text, t.x0, t.x1 = "word", None, original[0], original[1], original[2]
 
 
 # --------------------------------------------------------------------------- text checkboxes
@@ -246,13 +257,32 @@ def _form_tokens(reader, page_index: int, number: int, placeholders: bool) -> li
             flags = int(_inherited(a, "/Ff") or 0)
             if flags & (1 << 16):  # push button
                 continue
+            # the widget's own "on" name: a radio option's export value ("/Male"), "/Yes" for a box
+            on_names = []
+            try:
+                on_names = [str(k) for k in a["/AP"]["/N"].keys() if str(k) not in ("/Off", "Off")]
+            except Exception:
+                pass
             state = a.get("/AS")
             if state is None:
+                # no appearance state: on only when the field's value names *this* widget's option
                 v = _inherited(a, "/V")
-                state = v
+                state = v if (v is not None and (not on_names or str(v) in on_names)) else "/Off"
             checked = state is not None and str(state) not in ("/Off", "Off", "")
+            export = on_names[0].lstrip("/") if len(on_names) == 1 else None
             out.append(Token("[X]" if checked else "[ ]", x0, top, x1, bottom, number, "form_field", kind="checkbox",
-                             checked=checked, field_name=name, conf=0.98))
+                             checked=checked, field_name=name, conf=0.98,
+                             hint=export if export and export.lower() not in ("yes", "on", "1", "true") else None))
+        elif ft == "/Sig":
+            v = _inherited(a, "/V")
+            sig = v.get_object() if v is not None else None
+            if sig is not None and hasattr(sig, "get"):
+                who = sig.get("/Name")
+                text = f"digitally signed by {str(who).strip()}" if who else "digital signature"
+                out.append(Token(text, x0, top, x1, bottom, number, "form_field", field_name=name, conf=0.98,
+                                 hint="digital signature (not cryptographically verified)"))
+            elif placeholders:
+                out.append(Token("", x0, top, x1, bottom, number, "form_field", kind="placeholder", field_name=name))
         elif ft in ("/Tx", "/Ch"):
             v = _inherited(a, "/V")
             text = str(v).strip() if v is not None else ""

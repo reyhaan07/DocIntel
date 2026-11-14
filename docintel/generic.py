@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from .layout import (Cell, Table, TableRow, bbox_of, continuation_tokens, continue_table, find_table,
                      header_second_line, header_segments, join_tokens, segments, slug)
 from .models import Attribute, Entity, Line, Region, Relationship, Evidence, Token
-from .normalize import clean, format_phone, is_ambiguous_date, label_text, parse_date
+from .normalize import clean, format_phone, is_ambiguous_date, label_text, parse_date, phone_ok
 from .template import norm
 
 GENERIC_TYPES = {
@@ -57,9 +57,10 @@ def detect_value(raw: str, date_order: str = "mdy", label: str = ""):
     if re.fullmatch(r"[\w.+-]+@[\w-]+(\.[\w-]+)+", v.replace(" ", "")):
         return v.replace(" ", "").lower(), "email"
     digits = re.sub(r"\D", "", v)
+    if PHONE_LABEL.search(label or "") and re.fullmatch(r"[\d\s().+/-]{7,24}(?:\s*(?:x|ext\.?)\s*\d{1,6})?", v, re.I) \
+            and phone_ok(v):
+        return format_phone(v), "phone"
     if re.fullmatch(r"[\d\s().+-]{10,18}", v) and len(digits) in (10, 11):
-        if PHONE_LABEL.search(label or ""):
-            return format_phone(v), "phone"
         return v, "number"
     if re.fullmatch(r"[-+]?[$€£]\s?\d[\d,]*(\.\d+)?|[-+]?\d[\d,]*(\.\d{2})\s?(USD|EUR|GBP)?", v):
         return v, "amount"

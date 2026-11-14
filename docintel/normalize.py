@@ -86,13 +86,43 @@ def parse_date(text: str, order: str = "mdy") -> str | None:
         return None
 
 
+_EXT = re.compile(r"\s*(?:,|;)?\s*(?:x|ext\.?|extension)\s*(\d{1,6})\s*$", re.I)
+_INTL = re.compile(r"^\s*(?:\+|00)\s*")
+
+
+def phone_parts(text: str) -> tuple[str, str | None, bool]:
+    """(number without extension, extension, international).  '+44 20 7946 0958' and
+    '0049 30 1234567' are international unless the country code is 1 (US/Canada)."""
+    t = clean(text or "")
+    ext = None
+    m = _EXT.search(t)
+    if m:
+        ext, t = m.group(1), t[:m.start()]
+    intl = bool(_INTL.match(t))
+    if intl:
+        rest = _INTL.sub("", t)
+        if re.sub(r"\D", "", rest).startswith("1") and len(re.sub(r"\D", "", rest)) == 11:
+            intl, t = False, rest
+    return t, ext, intl
+
+
 def format_phone(text: str) -> str:
-    digits = re.sub(r"\D", "", text or "")
+    t, ext, intl = phone_parts(text)
+    tail = f" ext. {ext}" if ext else ""
+    if intl:
+        return "+" + _INTL.sub("", t) + tail  # written grouping kept: it differs by country
+    digits = re.sub(r"\D", "", t)
     if len(digits) == 11 and digits.startswith("1"):
         digits = digits[1:]
     if len(digits) == 10:
-        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+        return f"({digits[:3]}) {digits[3:6]}-{digits[6:]}" + tail
     return clean(text)
+
+
+def phone_ok(text: str) -> bool:
+    t, _, intl = phone_parts(text)
+    n = len(re.sub(r"\D", "", t))
+    return 8 <= n <= 15 if intl else n in (10, 11) and not (n == 11 and not re.sub(r"\D", "", t).startswith("1"))
 
 
 SEX_OTHER = {"x", "u", "o", "other", "unknown", "intersex", "non binary", "nonbinary", "nb", "transgender",
@@ -118,8 +148,7 @@ def normalise(value: str, vtype: str, date_order: str = "mdy"):
         iso = parse_date(v, date_order)
         return (iso, True) if iso else (v, False)
     if vtype == "phone":
-        p = format_phone(v)
-        return p, len(re.sub(r"\D", "", v)) in (10, 11)
+        return format_phone(v), phone_ok(v)
     if vtype == "sex":
         low = norm_words(v)
         if low in ("f", "female", "woman", "fem"):

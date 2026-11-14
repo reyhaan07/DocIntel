@@ -80,3 +80,14 @@ def test_choice_value_doubts():
     assert text is None and "none of the options" in problems[0]
     text, _, problems = choice_value(toks("[X] F [X] M"))
     assert text == "F, M" and "2 options are ticked" in problems[0]
+
+
+def test_phone_numbers_beyond_us_format():
+    from docintel.normalize import normalise
+
+    assert normalise("+44 20 7946 0958", "phone") == ("+44 20 7946 0958", True)
+    assert normalise("0049 30 1234567", "phone") == ("+49 30 1234567", True)
+    assert normalise("+31 6 1234567", "phone") == ("+31 6 1234567", True)  # never re-grouped as a US number
+    assert normalise("+1 312 555 0147", "phone") == ("(312) 555-0147", True)
+    assert normalise("312.555.0147 x45", "phone") == ("(312) 555-0147 ext. 45", True)
+    assert normalise("555-0147", "phone")[1] is False  # too short: reviewed

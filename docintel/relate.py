@@ -229,8 +229,8 @@ class Relater:
             return
         printed = agr.attributes.get("printed_name")
         signer = printed.value if printed else None
-        if not signer and isinstance(sig.value, str) and re.match(r"^/s/", sig.value.strip(), re.I):
-            signer = re.sub(r"^/s/\s*", "", sig.value.strip(), flags=re.I)
+        if not signer and isinstance(sig.value, str) and re.match(r"^(/s/|digitally signed by\b)", sig.value.strip(), re.I):
+            signer = re.sub(r"^(/s/|digitally signed by)\s*", "", sig.value.strip(), flags=re.I)
         warnings = []
         conf = 0.9
         subject = P

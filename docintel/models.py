@@ -44,6 +44,10 @@ class Token:
         return self.bottom - self.top
 
     @property
+    def width(self) -> float:
+        return self.x1 - self.x0
+
+    @property
     def is_content(self) -> bool:
         if self.kind == "furniture":  # running header / footer
             return False
