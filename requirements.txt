@@ -6,5 +6,7 @@ pillow>=10.0
 starlette>=0.37
 uvicorn>=0.29
 python-multipart>=0.0.9
-# optional OCR for scanned pages (also needs the tesseract binary)
-# pytesseract>=0.3.10
+numpy>=1.24
+# OCR for scanned pages: the Python wrapper below plus the local Tesseract program
+# (apt-get install tesseract-ocr / brew install tesseract / Windows installer)
+pytesseract>=0.3.10

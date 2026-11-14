@@ -9,7 +9,8 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-from .layout import Cell, Table, bbox_of, build_lines, build_regions, find_table, match_aliases, region_lines
+from .layout import (Cell, Table, bbox_of, build_lines, build_regions, find_table, join_tokens, match_aliases,
+                     region_lines)
 from .models import Attribute, Entity, Line, PageData, Region, Token
 from .normalize import clean, label_text, name_key, normalise, split_list, split_person_name
 from .template import Template, norm, norm_tokens
@@ -24,6 +25,7 @@ TYPE_NAMES = {
 
 BASE_CONF = {"key_value": 0.92, "table": 0.90, "checkbox": 0.90, "family": 0.85, "signature": 0.90}
 WRAPPED_CONF = 0.55
+OCR_REVIEW_CONF = 0.6  # an OCR word read with less confidence than this is never accepted silently
 WRAP_NOTE = "value continues on a following line with no row key; merged into the row above"
 
 
@@ -53,7 +55,12 @@ def _parse_kv_line(tokens: list[Token], table) -> list[tuple[dict | None, list[T
                 last = tokens[i + consumed - 1]
                 nxt = tokens[i + consumed] if i + consumed < n else None
                 colon_tok = nxt is not None and nxt.text == ":"
-                if last.text.endswith(":") or colon_tok or (nxt is not None and nxt.source == "form_field" and nxt.kind != "checkbox"):
+                # OCR often loses a label's colon: accept a label that stands apart on its line
+                ocr_label = (all(x.source == "ocr" for x in tokens[i:i + consumed])
+                             and (i == 0 or tokens[i].x0 - tokens[i - 1].x1 > 12)
+                             and (nxt is None or nxt.x0 - last.x1 > 15))
+                if (last.text.endswith(":") or colon_tok or ocr_label
+                        or (nxt is not None and nxt.source == "form_field" and nxt.kind != "checkbox")):
                     end = i + consumed + (1 if colon_tok else 0)
                     labels.append((i, end, spec))
                     i = end
@@ -122,10 +129,17 @@ class Binder:
         vb = bbox or (bbox_of(vt) if vt else None)
         lb = bbox_of(label_tokens) if label_tokens else None
         anchor = vb or lb or [0, 0, 0, 0]
+        notes = list(notes or [])
+        ocr_words = [t for t in vt if t.source == "ocr" and t.kind == "word"]
+        if ocr_words and status == "valid":
+            low = min(ocr_words, key=lambda t: t.conf)
+            if low.conf < OCR_REVIEW_CONF:
+                status = "needs_review"
+                notes.append(f"OCR read '{low.text}' with low confidence ({low.conf:.2f}); confirm it against the page")
         return Attribute(
             value=value, field_label=label if label is not None else label_text(" ".join(t.text for t in label_tokens)),
             page=page, bbox=vb, extraction_method=method or m, confidence=conf if conf is not None else c,
-            raw=raw, label_bbox=lb, status=status, notes=list(notes or []),
+            raw=raw, label_bbox=lb, status=status, notes=notes,
             section=region.name if region else None, region_id=region.region_id if region else None,
             row=row, order=(page or 0, anchor[1], anchor[0]),
         )
@@ -183,13 +197,12 @@ class Binder:
                 self.slot(f"{spec['key']}.{key}", vtoks, region, label_text(" ".join(t.text for t in ltoks)))
                 found[key] = None  # type: ignore
                 continue
-            raw = clean(" ".join(t.text for t in vtoks))
+            raw = clean(join_tokens(vtoks))
             if not raw:
                 continue
             value, ok = normalise(raw, fspec.get("type", "text"))
             attr = self.make_attr(value, ltoks, vtoks, "key_value", region, raw=raw)
-            if not ok:
-                attr.notes.append(f"value '{raw}' does not look like a {fspec.get('type')}")
+            _type_notes(attr, raw, value, ok, fspec.get("type", "text"))
             found[key] = attr
         if self.scan:
             return None
@@ -322,6 +335,7 @@ class Binder:
             value, ok = normalise(raw, cspec.get("type", "text"))
             wrapped = ckey in row.wrapped_columns
             attr = self.make_attr(value, htoks, cell.all_tokens, "table", region, raw=raw, row=rowno)
+            _type_notes(attr, raw, value, ok, cspec.get("type", "text"))
             if wrapped:
                 attr.confidence = WRAPPED_CONF
                 attr.status = "needs_review"
@@ -642,15 +656,20 @@ class Binder:
                 self.slot(f"{spec['key']}.{key}", vtoks, region, label_text(" ".join(t.text for t in ltoks)))
                 found[key] = (None, ltoks)  # type: ignore
                 continue
-            raw = clean(" ".join(t.text for t in vtoks if t.kind == "word"))
+            raw = clean(join_tokens([t for t in vtoks if t.kind == "word"]))
             if key == "signature":
                 sig_labels = (region, ln, ltoks, vtoks)
                 if raw:
                     ocr = any(t.source == "ocr" for t in vtoks)
-                    if ocr and not raw.lower().startswith("/s/") and len(re.findall(r"[A-Za-z]{2,}", raw)) < 2:
+                    words = [t for t in vtoks if t.kind == "word"]
+                    mean_conf = sum(t.conf for t in words) / max(1, len(words))
+                    # handwriting read by OCR comes out as short, low-confidence fragments
+                    if ocr and not raw.lower().startswith("/s/") and (
+                            len(re.findall(r"[A-Za-z]{2,}", raw)) < 2 or mean_conf < 0.7):
                         attr = self.make_attr("ink signature", ltoks, vtoks, "key_value", region, raw=raw)
                         attr.extraction_method = "ocr_signature"
-                        attr.notes.append(f"OCR read the ink as '{raw}'")
+                        attr.status = "valid"  # the ink is the evidence; the letters OCR saw in it are not
+                        attr.notes = [f"handwriting on the signature line (OCR saw it as '{raw}')"]
                     else:
                         attr = self.make_attr(raw, ltoks, vtoks, "key_value", region, raw=raw)
                     found[key] = (attr, ltoks)
@@ -694,6 +713,21 @@ class Binder:
 
 
 # --------------------------------------------------------------------------- free-text helpers
+def _type_notes(attr: Attribute, raw: str, value, ok: bool, vtype: str) -> None:
+    """Explain corrections and doubtful formats.  An OCR value that had to be corrected,
+    or that does not fit its type, goes to review instead of being trusted."""
+    ocr = attr.extraction_method.startswith("ocr")
+    if vtype in ("dosage", "year") and isinstance(value, str) and value.replace(" ", "") != raw.replace(" ", ""):
+        attr.notes.append(f"read as '{raw}', corrected to '{value}'")
+        if ocr and attr.status == "valid":
+            attr.status = "needs_review"
+    if not ok and vtype not in ("text", "person_name", "lower", "list"):
+        attr.notes.append(f"value '{raw}' does not look like a {vtype.replace('_', ' ')}")
+        if ocr and attr.status == "valid":
+            attr.status = "needs_review"
+
+
+
 def _split_tokens(tokens: list[Token]) -> list[tuple[str, list[Token]]]:
     """Split a comma separated run of tokens into (text, tokens) pieces."""
     pieces: list[tuple[str, list[Token]]] = []

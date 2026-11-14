@@ -19,10 +19,12 @@ STATIC = Path(__file__).parent / "static"
 MAX_UPLOAD = 25 * 1024 * 1024
 
 
-def create_app(data_dir: str | Path = "docintel_data", seed: str | Path | None = None, ocr: bool = False) -> Starlette:
-    store = Store(data_dir)
+def create_app(data_dir: str | Path = "docintel_data", seed: str | Path | None = None, ocr: bool | str = "auto",
+               verbose: bool = False) -> Starlette:
+    """``ocr``: "auto" reads scanned pages when an OCR engine is installed, False never does."""
+    store = Store(data_dir, ocr=ocr)
     if seed and not store.ids() and Path(seed).is_dir():
-        store.seed(seed)
+        store.seed(seed, progress=print if verbose else None)
 
     def _doc(doc_id: str) -> dict:
         try:
@@ -41,7 +43,7 @@ def create_app(data_dir: str | Path = "docintel_data", seed: str | Path | None =
         files = form.getlist("files") or form.getlist("file")
         if not files:
             raise HTTPException(400, "no files in the upload")
-        use_ocr = ocr or request.query_params.get("ocr") == "1"
+        use_ocr = True if request.query_params.get("ocr") == "1" else ocr
         results = []
         for f in files:
             name = Path(getattr(f, "filename", "") or "upload.pdf").name
@@ -73,7 +75,7 @@ def create_app(data_dir: str | Path = "docintel_data", seed: str | Path | None =
     def reprocess(request: Request):
         doc_id = request.path_params["doc_id"]
         _doc(doc_id)
-        use_ocr = request.query_params.get("ocr") == "1"
+        use_ocr = True if request.query_params.get("ocr") == "1" else None
         if use_ocr and not ocr_available():
             raise HTTPException(400, "no OCR engine is installed (pip install pytesseract; install tesseract)")
         doc = store.reprocess(doc_id, ocr=use_ocr)

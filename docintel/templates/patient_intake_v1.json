@@ -105,7 +105,7 @@
       "columns": [
         {"key": "name", "label": "Medication Name", "row_key": true, "required": true, "type": "text",
          "aliases": ["medication name", "medication", "drug", "drug name", "name of medication", "medicine"]},
-        {"key": "dosage", "label": "Dosage", "required": true, "type": "text",
+        {"key": "dosage", "label": "Dosage", "required": true, "type": "dosage",
          "aliases": ["dosage", "dose", "strength", "amount"]},
         {"key": "frequency", "label": "Frequency", "required": true, "type": "text",
          "aliases": ["frequency", "how often", "directions", "times per day"]},

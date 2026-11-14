@@ -78,6 +78,7 @@ class PageData:
     image_only: bool = False
     ocr_used: bool = False
     form_fields: int = 0
+    deskew_angle: float = 0.0
 
 
 @dataclass

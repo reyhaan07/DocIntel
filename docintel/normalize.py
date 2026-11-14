@@ -75,11 +75,16 @@ def normalise(value: str, vtype: str):
     if vtype == "state":
         return v.upper(), bool(re.fullmatch(r"[A-Za-z]{2}", v))
     if vtype == "zip":
+        v = v.replace(" ", "")
         return v, bool(re.fullmatch(r"\d{5}(-\d{4})?", v))
     if vtype == "email":
+        v = v.replace(" ", "")  # OCR may split an address at '@' or '.'
         return v.lower(), "@" in v
     if vtype == "year":
+        v = _digits_fix(v)
         return v, bool(re.fullmatch(r"\d{4}", v))
+    if vtype == "dosage":
+        return fix_dosage(v)
     if vtype == "list":
         return split_list(v), True
     return v, True
@@ -129,3 +134,29 @@ def display_date(iso: str | None) -> str:
         return ""
     m = re.fullmatch(r"(\d{4})-(\d{2})-(\d{2})", iso)
     return f"{m.group(2)}/{m.group(3)}/{m.group(1)}" if m else iso
+
+
+# --------------------------------------------------------------------------- OCR-style confusions
+_DIGIT_LIKE = str.maketrans({"o": "0", "O": "0", "l": "1", "I": "1", "|": "1"})
+_UNITS = {"meg": "mcg", "mcq": "mcg", "rng": "mg", "mq": "mg", "rnl": "ml", "lU": "IU", "1U": "IU", "iu": "IU"}
+_DOSE = re.compile(r"^(?P<num>[\dOoIl|.,/]+)\s*(?P<unit>[A-Za-z%]+)?(?P<rest>.*)$")
+
+
+def _digits_fix(text: str) -> str:
+    """Letters that OCR confuses with digits, fixed only inside a token that already has a digit."""
+    return " ".join(w.translate(_DIGIT_LIKE) if re.search(r"\d", w) and re.fullmatch(r"[\dOoIl|.,/-]+", w) else w
+                    for w in text.split())
+
+
+def fix_dosage(text: str):
+    """'75 meg' -> '75 mcg', '4o mg' -> '40 mg'.  Returns (value, looks_like_a_dose)."""
+    m = _DOSE.match(text.strip())
+    if not m or not re.search(r"\d", m.group("num")):
+        return text, False
+    num = m.group("num").translate(_DIGIT_LIKE)
+    unit = m.group("unit") or ""
+    unit = _UNITS.get(unit, _UNITS.get(unit.lower(), unit))
+    value = clean(f"{num} {unit}{m.group('rest')}")
+    ok = bool(re.match(r"^[\d.,/]+\s*(mg|mcg|g|ml|iu|units?|puffs?|tabs?|tablets?|caps?|capsules?|drops?|%|meq|mmol)\b",
+                       value, re.I))
+    return value, ok

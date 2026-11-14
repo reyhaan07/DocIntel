@@ -166,7 +166,7 @@ def test_flattened_form_detects_ticked_boxes_and_ink(processed):
     assert not any(e["type"] == "Spouse" for e in doc["entities"].values())
 
 
-def test_scanned_pdf_needs_ocr(processed):
+def test_scanned_pdf_without_ocr_is_flagged(processed):
     doc = processed["D"]
     assert doc["document"]["status"] == "needs_ocr"
     assert all(p["image_only"] for p in doc["document"]["pages"])

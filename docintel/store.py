@@ -53,8 +53,9 @@ def write_batch_files(out_dir: Path, docs: list[dict]) -> None:
 
 
 class Store:
-    def __init__(self, root: str | Path):
+    def __init__(self, root: str | Path, ocr: bool | str = "auto"):
         self.root = Path(root)
+        self.ocr = ocr
         self.docs_dir = self.root / "documents"
         self.docs_dir.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
@@ -98,7 +99,7 @@ class Store:
         return f"DOC_{n:03d}"
 
     # ------------------------------------------------------------------ mutations
-    def add(self, data: bytes, filename: str, *, ocr: bool = False) -> dict:
+    def add(self, data: bytes, filename: str, *, ocr: bool | str | None = None) -> dict:
         with self.lock:
             doc_id = self.next_id()
             ddir = self.doc_dir(doc_id)
@@ -121,7 +122,8 @@ class Store:
             self.write_index()
             return doc
 
-    def _process(self, doc_id: str, filename: str, *, ocr: bool = False) -> dict:
+    def _process(self, doc_id: str, filename: str, *, ocr: bool | str | None = None) -> dict:
+        ocr = self.ocr if ocr is None else ocr
         with self.lock:
             ddir = self.doc_dir(doc_id)
             shutil.rmtree(ddir / "pages", ignore_errors=True)
@@ -131,7 +133,7 @@ class Store:
             self.write_index()
             return doc
 
-    def reprocess(self, doc_id: str, *, ocr: bool = False) -> dict:
+    def reprocess(self, doc_id: str, *, ocr: bool | str | None = None) -> dict:
         doc = self.get(doc_id)
         return self._process(doc_id, doc["document"]["filename"], ocr=ocr)
 
@@ -166,8 +168,11 @@ class Store:
         with self.lock:
             return self.page_image(doc_id, kind, page).read_bytes()
 
-    def seed(self, folder: str | Path) -> list[dict]:
+    def seed(self, folder: str | Path, progress=None) -> list[dict]:
         out = []
-        for pdf in sorted(Path(folder).glob("*.pdf")):
+        files = sorted(Path(folder).glob("*.pdf"))
+        for i, pdf in enumerate(files, start=1):
+            if progress:
+                progress(f"processing sample {i}/{len(files)}: {pdf.name}")
             out.append(self.add(pdf.read_bytes(), pdf.name))
         return out

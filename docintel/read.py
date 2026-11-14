@@ -7,31 +7,26 @@ Turns a PDF into positioned tokens per page:
 * ticked boxes are detected visually (ink inside small printed squares) or from
   printed markers such as ``[X]`` / ``[ ]``,
 * drawn signatures are kept as ink marks,
-* image-only (scanned) pages are flagged and, when an OCR engine is available and
-  requested, read through OCR.
+* image-only (scanned) pages are read through local OCR (see ``ocr.py``) when an
+  OCR engine is installed, and flagged as needing OCR otherwise.
 """
 from __future__ import annotations
 
 import re
-import shutil
 from pathlib import Path
 
+from . import ocr as ocr_engine
 from .models import Mark, PageData, Token
 
 CHECK_ON = {"[x]", "[✓]", "[✔]", "[v]", "☒", "☑", "✓", "✔", "■"}
 CHECK_OFF = {"[ ]", "[]", "☐", "□"}
-_OCR_BOX = re.compile(r"^[\[{(|lI]\s*([xXkK×]?)\s*[\]})|lI1J]$")
 _BOX_PREFIX = re.compile(r"^(\[\s*[xX✓✔vV]?\s*\]|☒|☑|☐|□)(.+)$")
 
 FOOTER_MARGIN = 36.0
 
 
 def ocr_available() -> bool:
-    try:
-        import pytesseract  # noqa: F401
-    except Exception:
-        return False
-    return shutil.which("tesseract") is not None
+    return ocr_engine.available()
 
 
 # --------------------------------------------------------------------------- text checkboxes
@@ -208,89 +203,18 @@ def _form_tokens(reader, page_index: int, number: int, placeholders: bool) -> li
     return out
 
 
-# --------------------------------------------------------------------------- OCR
-def _ocr_tokens(pdf_path: Path, number: int) -> list[Token]:
-    import pytesseract
-
-    from .render import render_page_gray
-
-    scale = 300 / 72
-    img = render_page_gray(pdf_path, number, scale=scale)
-    data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT, config="--psm 11")
-    out = []
-    for i, text in enumerate(data["text"]):
-        text = (text or "").strip()
-        try:
-            conf = float(data["conf"][i])
-        except (TypeError, ValueError):
-            conf = -1
-        if not text or conf < 30:
-            continue
-        if re.fullmatch(r"[|_{}\[\]()\\/~`'\".,:;-]+", text) and text not in ("[]",):
-            continue  # scanner noise / table rules
-        box = _OCR_BOX.match(text)
-        if box:
-            text = "[X]" if box.group(1).strip() else "[ ]"
-        if text.endswith(";") and text[:-1].isalpha():
-            text = text[:-1] + ":"
-        x0 = data["left"][i] / scale
-        top = data["top"][i] / scale
-        x1 = x0 + data["width"][i] / scale
-        bottom = top + data["height"][i] / scale
-        out.append(Token(text, x0, top, x1, bottom, number, "ocr", conf=conf / 100.0))
-    return out
-
-
-def _image_ink_marks(pdf_path: Path, number: int, tokens: list[Token]) -> list[Mark]:
-    """Ink on a scanned page that OCR did not read as text (e.g. handwritten signatures)."""
-    from .render import render_page_gray
-
-    scale, cell = 1.5, 3.0
-    img = render_page_gray(pdf_path, number, scale=scale)
-    w, h = img.size
-    px = img.load()
-    cols, rows = int(w / (cell * scale)) + 1, int(h / (cell * scale)) + 1
-    dark = [[False] * cols for _ in range(rows)]
-    for y in range(0, h):
-        for x in range(0, w):
-            if px[x, y] < 110:
-                dark[int(y / (cell * scale))][int(x / (cell * scale))] = True
-    for t in tokens:  # text already explained by OCR is not ink
-        for r in range(max(0, int((t.top - 2) / cell)), min(rows, int((t.bottom + 2) / cell) + 1)):
-            for c in range(max(0, int((t.x0 - 2) / cell)), min(cols, int((t.x1 + 2) / cell) + 1)):
-                dark[r][c] = False
-    seen = [[False] * cols for _ in range(rows)]
-    marks = []
-    for r in range(rows):
-        for c in range(cols):
-            if not dark[r][c] or seen[r][c]:
-                continue
-            stack, cells = [(r, c)], []
-            seen[r][c] = True
-            while stack:
-                y, x = stack.pop()
-                cells.append((y, x))
-                for dy in (-1, 0, 1):
-                    for dx in (-2, -1, 0, 1, 2):
-                        ny, nx = y + dy, x + dx
-                        if 0 <= ny < rows and 0 <= nx < cols and dark[ny][nx] and not seen[ny][nx]:
-                            seen[ny][nx] = True
-                            stack.append((ny, nx))
-            ys = [y for y, _ in cells]
-            xs = [x for _, x in cells]
-            x0, x1 = min(xs) * cell, (max(xs) + 1) * cell
-            t0, t1 = min(ys) * cell, (max(ys) + 1) * cell
-            if (x1 - x0) >= 30 and 7 <= (t1 - t0) <= 45 and len(cells) < 0.8 * ((max(xs) - min(xs) + 1) * (max(ys) - min(ys) + 1)):
-                marks.append(Mark(number, x0, t0, x1, t1, kind="image"))
-    return marks
-
-
 # --------------------------------------------------------------------------- entry point
-def read_pdf(path: str | Path, *, ocr: bool = False, placeholders: bool = False) -> list[PageData]:
+def read_pdf(path: str | Path, *, ocr: bool | str = "auto", placeholders: bool = False) -> list[PageData]:
+    """``ocr``: "auto" (default) reads scanned pages when an OCR engine is installed,
+    True forces OCR (error if no engine), False never runs OCR."""
     import pdfplumber
     from pypdf import PdfReader
 
     path = Path(path)
+    if ocr is True and not ocr_engine.available():
+        raise RuntimeError("OCR was requested but no OCR engine is installed "
+                           "(pip install pytesseract, and install the tesseract program)")
+    run_ocr = bool(ocr) and ocr_engine.available()
     reader = PdfReader(str(path))
     pages: list[PageData] = []
     with pdfplumber.open(str(path)) as pdf:
@@ -321,9 +245,11 @@ def read_pdf(path: str | Path, *, ocr: bool = False, placeholders: bool = False)
                 if big:
                     pd.image_only = True
                     pd.marks = []
-                    if ocr and ocr_available():
-                        tokens = _normalise_checkbox_tokens(_ocr_tokens(path, number))
-                        pd.marks = _image_ink_marks(path, number, tokens)
+                    if run_ocr:
+                        res = ocr_engine.ocr_page(path, number, W, H)
+                        tokens = _normalise_checkbox_tokens(res.tokens)
+                        pd.marks = res.marks
+                        pd.deskew_angle = res.angle
                         pd.ocr_used = True
             # drop running headers/footers in the outer margins
             tokens = [t for t in tokens if t.top < H - FOOTER_MARGIN or t.kind != "word"]

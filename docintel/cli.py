@@ -14,12 +14,30 @@ import sys
 from pathlib import Path
 
 
+def _ocr_mode(args):
+    if getattr(args, "no_ocr", False):
+        return False
+    if getattr(args, "ocr", False):
+        return True
+    return "auto"
+
+
+def _ocr_banner() -> None:
+    from .ocr import engine_name
+
+    name = engine_name()
+    print(f"OCR for scanned pages: {name} (local)" if name else
+          "OCR for scanned pages: not available - pip install pytesseract and install the tesseract program")
+
+
 def _cmd_serve(args) -> int:
     import uvicorn
 
     from .server import create_app
 
-    app = create_app(args.data, seed=None if args.no_seed else args.seed, ocr=args.ocr)
+    if not args.no_ocr:
+        _ocr_banner()
+    app = create_app(args.data, seed=None if args.no_seed else args.seed, ocr=_ocr_mode(args), verbose=True)
     print(f"docintel web app at http://{'localhost' if args.host in ('127.0.0.1', '0.0.0.0') else args.host}:{args.port}")
     uvicorn.run(app, host=args.host, port=args.port, log_level="warning")
     return 0
@@ -36,11 +54,13 @@ def _cmd_process(args) -> int:
         return 1
     out = Path(args.output)
     out.mkdir(parents=True, exist_ok=True)
+    if not args.no_ocr:
+        _ocr_banner()
     docs = []
     print(f"{'doc':8} {'status':13} {'entities':>8} {'rels':>5} {'review':>6} {'missing':>7}  file")
     for i, f in enumerate(files, start=1):
         doc_id = f"DOC_{i:03d}"
-        doc = process_pdf(f, doc_id, ocr=args.ocr, standardized_path=out / f"{doc_id}_standardized.pdf")
+        doc = process_pdf(f, doc_id, ocr=_ocr_mode(args), standardized_path=out / f"{doc_id}_standardized.pdf")
         (out / f"{doc_id}.json").write_text(json.dumps(doc, indent=2), encoding="utf-8")
         docs.append(doc)
         s = doc["summary"]
@@ -98,13 +118,15 @@ def main(argv: list[str] | None = None) -> int:
     s.add_argument("--data", default="docintel_data", help="store directory (default: ./docintel_data)")
     s.add_argument("--seed", default="samples/input", help="folder processed on first start when the store is empty")
     s.add_argument("--no-seed", action="store_true", help="start with an empty store")
-    s.add_argument("--ocr", action="store_true", help="OCR scanned pages on upload (needs tesseract)")
+    s.add_argument("--no-ocr", action="store_true", help="do not OCR scanned pages (they are marked 'Needs OCR')")
     s.set_defaults(func=_cmd_serve)
 
     s = sub.add_parser("process", help="process a PDF or a folder of PDFs")
     s.add_argument("input")
     s.add_argument("-o", "--output", default="output")
-    s.add_argument("--ocr", action="store_true", help="OCR scanned pages (needs tesseract)")
+    g = s.add_mutually_exclusive_group()
+    g.add_argument("--ocr", action="store_true", help="require OCR for scanned pages (fail if no engine is installed)")
+    g.add_argument("--no-ocr", action="store_true", help="never OCR; scanned pages are marked 'Needs OCR'")
     s.set_defaults(func=_cmd_process)
 
     s = sub.add_parser("ask", help="ask a relationship question about a processed document")

@@ -7,7 +7,8 @@ PDF arrives in practice:
 * ``intake_B_flattened_lindqvist.pdf`` - the reference form, printed/flattened (no fields,
                                          ticked boxes are drawn, signatures are ink)
 * ``intake_C_other_clinic_rivera.pdf`` - another clinic's layout with its own headings
-* ``intake_D_scanned_rivera.pdf``      - a scan of packet C (image only, needs OCR)
+* ``intake_D_scanned_rivera.pdf``      - a scan of packet C (image only, read through OCR)
+* ``intake_E_scanned_lindqvist.pdf``   - a scan of packet B (drawn check boxes and ink on an image)
 
 ``patient_intake_v1.pdf`` (the blank fillable reference form) is written to the
 package's template directory and is what standardized output is filled into.
@@ -484,7 +485,7 @@ def make_riverside(path, title="Riverside New Patient Packet"):
 
 
 # --------------------------------------------------------------------------- scanned copy
-def make_scanned(src, path, dpi: int = 110, seed: int = 5):
+def make_scanned(src, path, dpi: int = 110, seed: int = 5, angles: list[float] | None = None):
     """Rasterise ``src`` and wrap the page images in an image-only PDF."""
     import pypdfium2 as pdfium
     from PIL import Image, ImageFilter
@@ -502,8 +503,9 @@ def make_scanned(src, path, dpi: int = 110, seed: int = 5):
             img = doc[i].render(scale=dpi / 72).to_pil().convert("L")
             images.append(img)
         doc.close()
-    for img in images:
-        img = img.rotate(rnd.uniform(-0.6, 0.6), resample=Image.BICUBIC, fillcolor=255)
+    for i, img in enumerate(images):
+        angle = angles[i % len(angles)] if angles else rnd.uniform(-0.6, 0.6)
+        img = img.rotate(angle, resample=Image.BICUBIC, fillcolor=255)
         px = img.load()
         w, h = img.size
         for _ in range(w * h // 180):
@@ -539,7 +541,9 @@ def generate_all(input_dir: str | Path = "samples/input", upload_dir: str | Path
     make_riverside(cc)
     d = input_dir / "intake_D_scanned_rivera.pdf"
     make_scanned(cc, d)
-    out += [a, b, cc, d]
+    e = input_dir / "intake_E_scanned_lindqvist.pdf"
+    make_scanned(b, e, seed=9)
+    out += [a, b, cc, d, e]
     if upload_dir:
         upload_dir = Path(upload_dir)
         upload_dir.mkdir(parents=True, exist_ok=True)

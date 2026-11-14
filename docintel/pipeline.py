@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .bind import TYPE_NAMES, bind
+from .ocr import engine_name as ocr_engine_name
+from .ocr import unskew_bbox
 from .read import ocr_available, read_pdf
 from .relate import relate
 from .template import Template, load_template
@@ -33,8 +35,34 @@ def _extraction_method(pages) -> str:
     return "none"
 
 
+def _unskew(doc: dict, pages) -> None:
+    """Scanned pages are read straightened; map every box back onto the original scan."""
+    angles = {p.number: (p.deskew_angle, p.width, p.height) for p in pages if p.ocr_used and p.deskew_angle}
+    if not angles:
+        return
+
+    def fix(d: dict, keys=("bbox", "label_bbox", "heading_bbox", "row_bbox")):
+        if d.get("page") in angles:
+            a, w, h = angles[d["page"]]
+            for k in keys:
+                if d.get(k):
+                    d[k] = unskew_bbox(d[k], a, w, h)
+
+    for sec in doc["sections"]:
+        fix(sec)
+    for e in doc["entities"].values():
+        fix(e, ("row_bbox",))
+        for a in e["attributes"].values():
+            fix(a)
+    for r in doc["relationships"]:
+        for ev in r["evidence"]:
+            fix(ev)
+    for item in doc["missing"] + doc["review_queue"]:
+        fix(item)
+
+
 def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | None = None,
-                template: Template | None = None, ocr: bool = False, standardized_path: str | Path | None = None,
+                template: Template | None = None, ocr: bool | str = "auto", standardized_path: str | Path | None = None,
                 processed_at: str | None = None) -> dict:
     t0 = time.perf_counter()
     path = Path(path)
@@ -49,7 +77,7 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
     for p in needs_ocr:
         reason = "scanned page has no text layer; run OCR to read it"
         if not ocr_available():
-            reason += " (no OCR engine is installed: pip install pytesseract and install tesseract)"
+            reason += " (no OCR engine is installed: pip install pytesseract and install the tesseract program)"
         ocr_items.append({"page": p.number, "reason": reason})
     review = review_queue(binder, rels, validation, ocr_items)
     missing = binder.missing if not needs_ocr else [m for m in binder.missing if m["kind"] != "not_provided"]
@@ -79,12 +107,13 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
             "page_count": len(pages),
             "pages": [{"page": p.number, "width": round(p.width, 2), "height": round(p.height, 2),
                        "has_text": p.has_text, "form_fields": p.form_fields, "image_only": p.image_only,
-                       "ocr_used": p.ocr_used} for p in pages],
+                       "ocr_used": p.ocr_used, "deskew_angle": p.deskew_angle} for p in pages],
             "extraction_method": _extraction_method(pages),
             "sha256": sha256_file(path),
             "processed_at": processed_at or datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
             "status": status,
             "ocr_available": ocr_available(),
+            "ocr_engine": ocr_engine_name() if any(p.ocr_used for p in pages) else None,
             "processing_ms": None,
         },
         "summary": {
@@ -112,6 +141,7 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
     }
     for e in doc["entities"].values():
         e.pop("_key", None)
+    _unskew(doc, pages)
     if standardized_path:
         from .standardize import fill_standardized
 

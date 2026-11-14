@@ -10,6 +10,7 @@ own header labels.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from difflib import SequenceMatcher
 
 from .models import Line, PageData, Region, Token
 from .template import Template, norm_tokens
@@ -43,6 +44,23 @@ def segments(line: Line, gap: float = 22.0) -> list[list[Token]]:
         else:
             segs.append([t])
     return segs
+
+
+def join_tokens(tokens) -> str:
+    """Text of a run of tokens.  OCR sometimes splits one word ('Appendectom' 'y'); pieces
+    closer than a quarter of the text height are joined without a space."""
+    out = ""
+    prev = None
+    for t in tokens:
+        if not t.text:
+            continue
+        if prev is not None:
+            glued = (t.source == "ocr" and prev.source == "ocr" and t.x0 - prev.x1 < 0.25 * min(t.height, prev.height)
+                     and t.text[:1].isalnum() and prev.text[-1:].isalnum())
+            out += "" if glued else " "
+        out += t.text
+        prev = t
+    return out.strip()
 
 
 def bbox_of(tokens) -> list[float]:
@@ -98,6 +116,13 @@ def find_headings(lines: list[Line], template: Template) -> list[Heading]:
     return found
 
 
+def _same_row(a: "Heading", b: "Heading") -> bool:
+    """Side-by-side headings: their text overlaps vertically (OCR boxes may include an underline)."""
+    overlap = min(a.bottom, b.bottom) - max(a.top, b.top)
+    smaller = min(a.bottom - a.top, b.bottom - b.top)
+    return abs(a.top - b.top) < 4 or abs(a.bottom - b.bottom) < 4 or (smaller > 0 and overlap >= 0.6 * smaller)
+
+
 def build_regions(pages: list[PageData], lines_by_page: dict[int, list[Line]], template: Template) -> list[Region]:
     regions: list[Region] = []
     counter = 0
@@ -108,7 +133,7 @@ def build_regions(pages: list[PageData], lines_by_page: dict[int, list[Line]], t
         # rows of side-by-side headings
         rows: list[list[Heading]] = []
         for h in heads:
-            if rows and abs(rows[-1][0].top - h.top) < 4:
+            if rows and any(_same_row(h, o) for o in rows[-1]):
                 rows[-1].append(h)
             else:
                 rows.append([h])
@@ -136,7 +161,7 @@ def build_regions(pages: list[PageData], lines_by_page: dict[int, list[Line]], t
         for h, x0, x1 in spans:
             bottom = pd.height
             for h2, a0, a1 in spans:
-                if h2.top > h.top + 4 and a0 < x1 and a1 > x0:
+                if h2.top > h.top and not _same_row(h, h2) and a0 < x1 and a1 > x0:
                     bottom = min(bottom, h2.top - 1)
             counter += 1
             sec = template.by_key[h.key]
@@ -163,22 +188,34 @@ def region_lines(region: Region, lines: list[Line], heading_tokens: set[int]) ->
 
 
 # --------------------------------------------------------------------------- label matching
+def _word_eq(a: str, b: str, fuzzy: bool) -> bool:
+    if a == b:
+        return True
+    if not fuzzy or len(b) < 5:
+        return False
+    return SequenceMatcher(None, a, b).ratio() >= 0.85
+
+
 def match_aliases(tokens: list[Token], start: int, table) -> tuple[int, dict] | None:
-    """Longest alias (from ``Template.alias_table``) that matches tokens[start:]."""
+    """Longest alias (from ``Template.alias_table``) that matches tokens[start:].
+
+    Words read by OCR are compared with a small tolerance ("Signatures" ~ "signature")."""
     words = []
     for t in tokens[start:start + 8]:
         if t.kind != "word":
             break
-        words.append(norm_tokens(t.text))
+        words.append((norm_tokens(t.text), t.source == "ocr"))
     flat: list[str] = []
+    fuzzy: list[bool] = []
     ends: list[int] = []  # flat index -> token count consumed
-    for i, w in enumerate(words):
+    for i, (w, f) in enumerate(words):
         for piece in w:
             flat.append(piece)
+            fuzzy.append(f)
             ends.append(i + 1)
     for alias, spec in table:
         n = len(alias)
-        if n <= len(flat) and flat[:n] == alias:
+        if n <= len(flat) and all(_word_eq(flat[k], alias[k], fuzzy[k]) for k in range(n)):
             consumed = ends[n - 1]
             # the alias must end exactly at a token boundary
             if n == len(flat) or ends[n] != ends[n - 1]:
@@ -194,7 +231,7 @@ class Cell:
 
     @property
     def text(self) -> str:
-        return " ".join(t.text for t in self.tokens + self.continued if t.text).strip()
+        return " ".join(x for x in (join_tokens(self.tokens), join_tokens(self.continued)) if x).strip()
 
     @property
     def all_tokens(self) -> list[Token]:
@@ -252,8 +289,11 @@ def find_table(lines: list[Line], columns_spec: list[dict], region: Region, min_
             cells = {spec["key"]: Cell() for spec, *_ in cols}
             stray = False
             for t in ln2.tokens:
+                # the token's left edge decides its column; OCR boxes may start a few
+                # points early, so look a little into the token (never past its middle)
+                ax = t.x0 + (min(6.0, (t.x1 - t.x0) / 2) if t.source == "ocr" else 0.5)
                 for spec, x0, x1, _ in cols:
-                    if x0 <= t.x0 + 0.5 < x1 or (spec is cols[-1][0] and t.x0 >= x0):
+                    if x0 <= ax < x1 or (spec is cols[-1][0] and ax >= x0):
                         cells[spec["key"]].tokens.append(t)
                         break
                 else:
