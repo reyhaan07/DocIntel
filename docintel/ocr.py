@@ -399,7 +399,7 @@ def fix_digit_letters(text: str) -> str:
     return out if re.sub(r"[^A-Za-z]", "", out) or re.search(r"\d", text) else text
 
 
-def _tesseract_words(img, config: str, page_number: int) -> list[Token]:
+def _tesseract_words(img, config: str, page_number: int, scale: float = SCALE) -> list[Token]:
     import os
 
     import pytesseract
@@ -416,11 +416,11 @@ def _tesseract_words(img, config: str, page_number: int) -> list[Token]:
             conf = max(0.0, float(data["conf"][i])) / 100.0
         except (TypeError, ValueError):
             conf = 0.0
-        w = data["width"][i] / SCALE
-        x0 = data["left"][i] / SCALE + w * trim
+        w = data["width"][i] / scale
+        x0 = data["left"][i] / scale + w * trim
         w = w * (1 - trim)
-        top = data["top"][i] / SCALE
-        bottom = top + data["height"][i] / SCALE
+        top = data["top"][i] / scale
+        bottom = top + data["height"][i] / scale
         for piece, f0, f1 in _split_glued(text):
             fixed = fix_digit_letters(piece)
             out.append(Token(fixed, x0 + w * f0, top, x0 + w * f1, bottom, page_number, "ocr", conf=conf,
@@ -428,9 +428,28 @@ def _tesseract_words(img, config: str, page_number: int) -> list[Token]:
     return out
 
 
+def _agreement(t: Token, k: int, passes: list[list[Token]]) -> int:
+    """How many other passes read the same word at the same spot."""
+    key = re.sub(r"\W", "", t.text.lower())
+    n = 0
+    for j, p in enumerate(passes):
+        if j == k:
+            continue
+        for u in p:
+            if u.page == t.page and min(t.x1, u.x1) - max(t.x0, u.x0) > 0.5 * min(t.x1 - t.x0, u.x1 - u.x0) \
+                    and min(t.bottom, u.bottom) - max(t.top, u.top) > 0 and re.sub(r"\W", "", u.text.lower()) == key:
+                n += 1
+                break
+    return n
+
+
 def _merge_passes(passes: list[list[Token]]) -> list[Token]:
-    """Keep, for every spot on the page, the reading with the highest confidence."""
-    cands = sorted((t for p in passes for t in p), key=lambda t: -t.conf)
+    """Keep, for every spot on the page, the reading the passes agree on, else the one
+    with the highest confidence (with three passes, two that agree outvote a third that
+    is surer of a different reading)."""
+    scored = [(t.conf + (0.25 * _agreement(t, k, passes) if len(passes) > 2 else 0.0), t)
+              for k, p in enumerate(passes) for t in p]
+    cands = [t for _, t in sorted(scored, key=lambda x: -x[0])]
     kept: list[Token] = []
     for t in cands:
         area = max(1e-3, (t.x1 - t.x0) * (t.bottom - t.top))
@@ -501,20 +520,38 @@ def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float
         img = img.rotate(-rotation, expand=True, fillcolor=255)
         if rotation in (90, 270):
             width, height = height, width
-    angle = estimate_skew(img) if deskew else 0.0
+    # a photo (unevenly lit paper) is read as it is: straightening and ruled-line removal
+    # are made for flat scans, and on photos - curled paper, a table or a hand around the
+    # page, print made of dots - they cost more words than they save (measured on receipt
+    # photos: 57 % of the words read without them, 40 % with them)
+    img, evened = even_out_lighting(img)
+    angle = estimate_skew(img) if deskew and not evened else 0.0
     if angle:
         img = img.rotate(angle, resample=Image.BICUBIC, fillcolor=255)
-    img, evened = even_out_lighting(img)
     page_arr = np.asarray(img)
     page_arr, bands = invert_dark_bands(page_arr)
-    clean, line_px = remove_lines(page_arr)
+    clean, line_px = (page_arr, 0) if evened else remove_lines(page_arr)
     clean_img = Image.fromarray(clean)
     from concurrent.futures import ThreadPoolExecutor
 
     # each pass gets its own image object (PIL images are not thread-safe) and a
     # single-threaded engine, so the two passes run side by side without contention
-    with ThreadPoolExecutor(max_workers=len(TESSERACT_PASSES)) as pool:
-        passes = list(pool.map(lambda cfg: _tesseract_words(clean_img.copy(), cfg, page_number), TESSERACT_PASSES))
+    # a photo (uneven light) is most often a receipt or a slip: one column of lines in
+    # several sizes, which Tesseract's single-column mode reads best - a third pass
+    configs = TESSERACT_PASSES + (("--psm 4",) if evened else ())
+    work, scale = clean_img, SCALE
+    if evened:
+        # photos come at any distance: words are read best about 32 pixels high, so a first
+        # single-column pass measures the print and the page is read again at that size
+        probe = _tesseract_words(clean_img, "--psm 4", page_number)
+        hs = sorted(t.height * SCALE for t in probe if t.conf > 0.6 and len(t.text) >= 3)
+        med = hs[len(hs) // 2] if len(hs) >= 5 else 0
+        if med > 40:
+            k = 32.0 / med
+            work = clean_img.resize((max(1, int(clean_img.width * k)), max(1, int(clean_img.height * k))), Image.BICUBIC)
+            scale = SCALE * k
+    with ThreadPoolExecutor(max_workers=len(configs)) as pool:
+        passes = list(pool.map(lambda cfg: _tesseract_words(work.copy(), cfg, page_number, scale), configs))
     tokens = _merge_passes(passes)
     if orient and _rotation is None and rotation in (0, 180) and len(tokens) >= 15 and _mean_conf(tokens) < 0.6:
         # orientation detection is unreliable on small or faint print: a page that reads

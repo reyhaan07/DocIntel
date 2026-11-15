@@ -51,6 +51,32 @@ def _title(binder) -> str | None:
     return first[0].name if first else None
 
 
+class _Joined:
+    def __init__(self, lines):
+        self.tokens = [t for ln in lines for t in ln.tokens]
+        self.page = lines[0].page
+
+
+def _printed_rows(lines) -> list[list]:
+    """Lines that sit side by side on one printed row, left to right.  On a photo the
+    print drifts, and a large amount ('GRAND TOTAL ...... 17,000') lands on a line of its
+    own beside its label; pieces whose heights overlap by a third and that do not overlap
+    across are one row."""
+    rows: list[list] = []
+    for ln in sorted(lines, key=lambda ln: (ln.top, ln.x0)):
+        for row in rows:
+            last = max(row, key=lambda r: r.x1)
+            first = min(row, key=lambda r: r.x0)
+            ov = min(ln.bottom, last.bottom) - max(ln.top, last.top)
+            h = min(ln.bottom - ln.top, last.bottom - last.top)
+            if ov > 0.35 * h and (ln.x0 > last.x1 + 2 or ln.x1 < first.x0 - 2):
+                row.append(ln)
+                break
+        else:
+            rows.append([ln])
+    return [sorted(r, key=lambda ln: ln.x0) for r in rows]
+
+
 def _typical_height(binder) -> float:
     hs = sorted(ln.bottom - ln.top for ln in binder.lines_by_page.get(1, []))
     return hs[len(hs) // 2] if hs else 10.0
@@ -406,7 +432,19 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
         doc["summary"]["fields_withheld"] = std["fields_withheld"]
     doc["document"]["processing_ms"] = int((time.perf_counter() - t0) * 1000)
     if not template_used:
+        from .layout import bbox_of, segments
         from .profiles import key_facts
 
-        doc["key_facts"] = key_facts(doc)
+        angles = {p.number: (p.deskew_angle, p.width, p.height) for p in pages if p.ocr_used and p.deskew_angle}
+
+        def page_box(ln):
+            b = bbox_of(ln.tokens)
+            return unskew_bbox(b, *angles[ln.page]) if ln.page in angles else b
+
+        printed = []
+        for pno in sorted(binder.lines_by_page):
+            for row in _printed_rows([ln for ln in binder.lines_by_page[pno] if any(t.kind == "word" for t in ln.tokens)]):
+                printed.append({"text": " | ".join(" | ".join(" ".join(t.text for t in seg) for seg in segments(ln))
+                                                   for ln in row), "page": pno, "bbox": page_box(_Joined(row))})
+        doc["key_facts"] = key_facts(doc, printed)
     return doc

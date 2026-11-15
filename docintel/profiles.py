@@ -419,6 +419,11 @@ def read_amount(text: str, decimals_expected: bool = False) -> tuple[str, str, l
     The amount is the rightmost one; other amounts on the same line, a value with
     no decimals where the document prints cents, and a decimal point OCR dropped
     ('88 17') all send it for review."""
+    sep = re.sub(r"(?<![\d.,])(\d{1,3})(?:\s+([.,])\s*|([.,])\s+)(\d{3})(?![\d])", lambda m: m.group(1) + (m.group(2) or m.group(3)) + m.group(4), text or "")
+    if sep != (text or ""):  # OCR set a space beside a thousands separator: '70, 000', '385 ,000'
+        r = read_amount(sep, decimals_expected)
+        if r:
+            return r[0], "needs_review", r[2] + [f"read '{(text or '').strip()[:20]}' with a space beside the thousands separator"]
     spaced = re.sub(r"(\d)([.,])\s(\d{2})(?!\d)", r"\1\2\3", text or "")
     if spaced != (text or ""):  # OCR set a space after the decimal point: '68. 87'
         r = read_amount(spaced, decimals_expected)
@@ -575,9 +580,16 @@ def _decimals_expected(texts: list[str]) -> bool:
     return cents >= 2 and cents > thousands
 
 
+def _alias_pattern(alias: str) -> str:
+    # OCR misreads the letters of TOTAL on photos ('TOTAI', 'Tota]', 'T0TAL'); the word is
+    # still recognised, and a fact read under a misspelt label goes to review
+    words = [r"t[o0]t[a@][l1i|\]]" if w.lower() == "total" else re.escape(w) for w in alias.split()]
+    return r"\s*".join(words)
+
+
 def _after_label(txt: str, alias: str, fact: str):
     """Rest of the line after each occurrence of ``alias`` at a word start."""
-    ap = r"\s*".join(re.escape(w) for w in alias.split())
+    ap = _alias_pattern(alias)
     for mm in re.finditer(rf"(?<![A-Za-z]){ap}\b", txt, flags=re.I):
         before = txt[max(0, mm.start() - 12):mm.start()].lower()
         if fact in ("total", "amount_due", "net_pay", "gross_pay") and \
@@ -591,14 +603,33 @@ def _after_label(txt: str, alias: str, fact: str):
         yield txt[mm.end(): end if end >= 0 else len(txt)], mm
 
 
-def key_facts(doc: dict) -> dict:
+def _value_part(rest: str) -> str:
+    """The value after a label on a printed line whose pieces are joined by ' | ': the
+    first piece that carries a digit, unless another label comes before it."""
+    if " | " not in rest:
+        return rest
+    for piece in rest.split(" | "):
+        if re.search(r"\d", piece):
+            return piece
+        if len(re.findall(r"[A-Za-z]{3,}", re.sub(_CUR, "", piece))) >= 1:
+            return ""  # the next label comes first: this one's amount is not on the line
+    return ""
+
+
+def key_facts(doc: dict, printed_lines: list[dict] | None = None) -> dict:
     """The key facts of the document's type, each with its source and a status:
-    'valid' when read cleanly, 'needs_review' when anything about it is uncertain."""
+    'valid' when read cleanly, 'needs_review' when anything about it is uncertain.
+    ``printed_lines`` are the page's lines as printed (pieces joined by ' | '), so that a
+    label and its amount set far apart on one line ('TOTAL ........ 46,000') are read
+    together even where the layout put them in separate blocks."""
     dtype = doc["document"].get("document_type")
     prof = PROFILES.get(dtype or "")
+    generic = {"date": ("date", ["date", "dated"]),
+               "total": ("money", ["grand total", "total amount", "total", "amount due", "total due"])}
     if prof is None:  # nothing names the type: its date and total are still worth stating
-        prof = {"facts": {"date": ("date", ["date", "dated"]),
-                          "total": ("money", ["grand total", "total amount", "total", "amount due", "total due"])}}
+        prof = {"facts": generic}
+    elif dtype == "form":  # an order or payment form states a total too
+        prof = {"facts": {**prof["facts"], "total": generic["total"]}}
     carried = doc["document"].get("carries")
     if carried in PROFILES:
         facts = dict(PROFILES[carried]["facts"])
@@ -616,6 +647,7 @@ def key_facts(doc: dict) -> dict:
             attrs.append((e, k, a))
     attrs.sort(key=lambda x: (x[2].get("page") or 0, (x[2].get("bbox") or [0, 0])[1], (x[2].get("bbox") or [0])[0]))
     lines = [b for b in doc.get("blocks", []) if b.get("type") in ("text", "heading") and b.get("text")]
+    lines += [dict(ln, printed=True) for ln in printed_lines or []]
     texts = [b["text"] for b in lines] + [str(a.get("raw") or a["value"]) for _, _, a in attrs]
     cents = _decimals_expected(texts)
 
@@ -677,6 +709,10 @@ def key_facts(doc: dict) -> dict:
             for rank, alias in enumerate(aliases):
                 for b in lines:
                     for rest, mm in _after_label(b["text"], alias, fact):
+                        if b.get("printed"):
+                            rest = _value_part(rest)
+                            if not rest:
+                                continue
                         words = {w.lower() for w in re.findall(r"[A-Za-z]{2,}", rest.split("\n")[0])}
                         if totalish and words & _NOT_TOTAL and not words & _INCLUSIVE:
                             continue
@@ -687,6 +723,9 @@ def key_facts(doc: dict) -> dict:
                             continue  # the label is part of a sentence
                         r = read(kind, rest.strip(" :.#\t"))
                         if r:
+                            said = re.sub(r"\s+", " ", mm.group(0)).lower()
+                            if said.replace(" ", "") != alias.lower().replace(" ", ""):
+                                r = (r[0], "needs_review", list(r[2]) + [f"the label was read as '{mm.group(0)}'"])
                             hits.append((rank, r, b, alias))
                 if hits:
                     break
@@ -712,15 +751,20 @@ def key_facts(doc: dict) -> dict:
                 days = {parse_date(v, "dmy") or v for v, _ in seen}
                 v, b = seen[0]
                 one = len(days) == 1
+                scanned = "ocr" in str(doc["document"].get("extraction_method") or "")
                 out[fact] = {"value": v, "label": "the date printed on the document", "page": b.get("page"),
                              "bbox": b.get("bbox"), "method": "only date printed" if one else "first date printed",
-                             "status": "valid" if one else "needs_review",
-                             "notes": [] if one else [f"{len(days)} different dates are printed; the first is taken"]}
+                             "status": "valid" if one and not scanned else "needs_review",
+                             "notes": ([] if one else [f"{len(days)} different dates are printed; the first is taken"])
+                             + (["read by OCR with no label to confirm it"] if scanned else [])}
                 continue
         if fact in ("merchant", "seller", "name") or (fact == "sender" and dtype == "letter"):
             org = _first_line_org(doc)
             if org:
                 t, b, status, notes = org
+                if status == "valid" and "ocr" in str(doc["document"].get("extraction_method") or ""):
+                    status, notes = "needs_review", notes + ["read by OCR from the top of the page, with no label to "
+                                                             "confirm the spelling"]
                 if fact == "seller" and status == "valid":
                     status, notes = "needs_review", ["taken from the company named at the top; confirm it is the seller"]
                 out[fact] = {"value": t, "label": "top of the document", "page": b.get("page"), "bbox": b.get("bbox"),
@@ -770,6 +814,18 @@ def _total_row(doc: dict, aliases: list[str], read) -> dict | None:
     return None
 
 
+def _like(example: str, value: float) -> str:
+    """An amount written the way the document writes its amounts ('50.000' -> '31.500')."""
+    m = _AMOUNT_TOKEN.match(str(example).strip())
+    dec = m.group(3) if m else None
+    thousands = re.search(r"\d([,.])\d{3}", m.group(2)) if m else None
+    sep = thousands.group(1) if thousands else ("," if not dec or dec[0] == "." else ".")
+    if dec:
+        whole, cents = f"{value:.2f}".split(".")
+        return f"{int(whole):,}".replace(",", sep) + dec[0] + cents
+    return f"{int(round(value)):,}".replace(",", sep)
+
+
 def _check_sums(out: dict) -> None:
     """Totals that disagree with the document's own arithmetic go to review."""
     def num(f):
@@ -799,9 +855,18 @@ def _check_sums(out: dict) -> None:
     if total is not None and cash is not None and change is not None and cash >= change:
         if abs(cash - change - total) > 0.011 and abs(cash - total) > 0.011:
             flag("total", f"cash {out['cash']['value']} - change {out['change']['value']} does not give the total")
-    if total is None and cash is not None and change is not None and cash > change > 0 and "total" not in out \
-            and any(k in out for k in ("cash", "change")):
-        pass  # the total is not printed where it can be read: leave it missing rather than derive it
+    if total is None and cash is not None and change is not None and cash > change >= 0 and "cash" in out:
+        # the total line could not be read, but the payment can: cash - change is the total;
+        # it stands as read only when the subtotal printed on the receipt says the same
+        derived = cash - change
+        agrees = sub is not None and abs(sub - derived) <= 0.011
+        out["total"] = {"value": _like(out["cash"]["value"], derived), "label": "cash - change",
+                        "page": out["cash"].get("page"), "bbox": out["cash"].get("bbox"),
+                        "method": "worked out from the payment",
+                        "status": "valid" if agrees and out["cash"]["status"] == "valid" and
+                        out["change"]["status"] == "valid" else "needs_review",
+                        "notes": [f"cash {out['cash']['value']} - change {out['change']['value']}"
+                                  + ("; equals the subtotal" if agrees else "; the total line itself was not read")]}
     if total is not None and sub is not None:
         ok = abs(sub - total) <= 0.011 or (tax is not None and abs(sub + tax - total) <= 0.051)
         if not ok and sub > total + 0.011:
