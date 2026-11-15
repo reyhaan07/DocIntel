@@ -152,6 +152,9 @@ def _tidy_fields(st) -> None:
 
 def _generic_flags(binder, attr: Attribute, raw: str, vtype: str, continued: bool) -> None:
     ocr = attr.extraction_method.startswith("ocr")
+    if ocr and attr.status == "valid" and re.search(r"[A-Za-z]{2,}:\s*$", raw or ""):
+        attr.notes.append(f"the value '{raw}' ends like a label ('...:'); the field may be empty - confirm")
+        attr.status = "needs_review"
     if ocr and attr.status == "valid" and _reads_like_label(raw):
         # on a scan, a 'value' made of field names is most likely the next label over an empty box
         attr.notes.append(f"the value '{raw}' reads like another label; the field may be empty - confirm")
@@ -555,6 +558,9 @@ def _labels_over_blocks(lines: list[Line], k: int):
             break
         if any(t.text.endswith(":") for sg in bsegs for t in sg[:3]):
             break  # a line with a label of its own ('Tax Id: ...')
+        if any(label_text(join_tokens(sg)).lower() in PARTY_LABELS | {"date", "subject", "re", "cc", "phone", "fax"}
+               for sg in bsegs):
+            break  # the next label, its colon lost ('FROM' under 'TO:')
         for sg in bsegs:
             i = max(i for i, x in enumerate(starts) if sg[0].x0 >= x - 8) if sg[0].x0 >= starts[0] - 8 else 0
             cols[i].append(list(sg))

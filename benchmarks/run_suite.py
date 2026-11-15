@@ -130,6 +130,8 @@ def score(suite: Path, out: Path, split: str, verbose: bool):
         def btext(b):
             parts = [b.get("text") or "", b.get("label") or "", str(b.get("value") or "")]
             parts += [" ".join(map(str, b.get("header") or []))] + [" ".join(map(str, r)) for r in b.get("rows") or []]
+            parts += [str(b.get("question") or "")] + [str(o.get("label") or "") if isinstance(o, dict) else str(o)
+                                                       for o in b.get("options") or []]  # check-box choices
             return " ".join(parts)
 
         exp = Counter(re.findall(r"[a-z0-9]+", gt["expected_text"].lower()))
