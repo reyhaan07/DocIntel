@@ -113,6 +113,56 @@ def _holds_label(raw: str) -> bool:
     return False
 
 
+def _pairing_flags(attr: Attribute, label_tokens: list[Token], value_tokens: list[Token]) -> None:
+    """How a label and a value were paired on a scan, where the pairing itself is weak:
+
+    * the value is spread across the line like separate entries ('FULL  x  PARTIAL',
+      'D. M. Frank    Date 10/10/84'): check-box choices or a second label, not one value;
+    * the value stands far from its label (more than ten letter heights) and carries no digit;
+    * the value is stacked under its label in the same size of print and carries no digit:
+      forms print a label small over the larger value it names, so two lines of the same
+      size are most often two labels."""
+    vt = [t for t in value_tokens if t.kind == "word"]
+    lt = [t for t in label_tokens if t.kind == "word"]
+    if attr.status != "valid" or not vt or not all(t.source == "ocr" for t in vt):
+        return
+    text = " ".join(t.text for t in vt)
+    digits = bool(re.search(r"\d", text))
+    gaps = [(b.x0 - a.x1) / max(1.0, min(a.height, b.height)) for a, b in zip(vt, vt[1:])
+            if abs(a.cy - b.cy) < 0.5 * max(a.height, b.height) and b.x0 > a.x0]
+    if gaps and max(gaps) > 2.0:
+        attr.status = "needs_review"
+        attr.notes.append(f"'{text[:40]}' is spread across the line like separate entries (check-box choices, or a "
+                          f"second label and its value) - confirm what belongs to '{attr.field_label}'")
+        return
+    if re.fullmatch(r"\(.*\)[:.]?|\(.*", text) and not digits:
+        attr.status = "needs_review"
+        attr.notes.append(f"'{text[:40]}' is an instruction in brackets, not a value - the field may be empty")
+        return
+    if len(lt) >= 3 and lt[0].text[:1].islower() and not lt[-1].text.endswith(":"):
+        attr.status = "needs_review"
+        attr.notes.append(f"'{attr.field_label}' starts in the middle of a sentence - it may be running text, not a label")
+        return
+    if not lt:
+        return
+    hv = sorted(t.height for t in vt)[len(vt) // 2]
+    hl = sorted(t.height for t in lt)[len(lt) // 2]
+    stacked = min(t.top for t in vt) > max(t.bottom for t in lt) - 1
+    if not stacked and not digits and min(t.x0 for t in vt) - max(t.x1 for t in lt) > 10 * max(hv, hl):
+        attr.status = "needs_review"
+        attr.notes.append(f"'{text[:40]}' stands far from the label '{attr.field_label}' - confirm they belong together")
+    elif stacked and not digits and hv < 1.15 * hl:
+        attr.status = "needs_review"
+        attr.notes.append(f"'{text[:40]}' is printed in the same size as the label above it - it may be another label")
+
+
+def _aligned(cell_tokens: list[Token], head_tokens: list[Token], tol: float) -> bool:
+    """A table value lines up under its column heading: left edges, right edges or centres."""
+    vx0, vx1 = min(t.x0 for t in cell_tokens), max(t.x1 for t in cell_tokens)
+    hx0, hx1 = min(t.x0 for t in head_tokens), max(t.x1 for t in head_tokens)
+    return abs(vx0 - hx0) <= tol or abs(vx1 - hx1) <= tol or abs((vx0 + vx1) - (hx0 + hx1)) / 2 <= tol
+
+
 _LEADER = re.compile(r"^[.…·_\-]+$")
 _LINE_NO = re.compile(r"^\d{1,2}[a-z]?$")
 
@@ -941,6 +991,13 @@ def build_generic(binder, st: Structure, template_used: bool, start_rel: int) ->
                                  label_bbox=bbox_of(f.label_tokens), extraction_method="layout_signature",
                                  confidence=0.9, section=f.region.name, region_id=f.region.region_id,
                                  order=(mk.page, mk.top, mk.x0))
+                if not SIGNATURE_WORDS.search(f.label) and not re.search(r"\b(by|initials?)\b", f.label, re.I):
+                    # ink beside a label that asks for no signature ('Date:', 'Job number:') is
+                    # handwriting OCR did not read, not a signature
+                    attr.value = "handwriting (not read)"
+                    attr.status = "needs_review"
+                    attr.confidence = 0.5
+                    attr.notes.append(f"ink next to '{f.label}' was not read as text - read it from the page")
             else:
                 attr = binder.make_attr(f.raw, f.label_tokens, f.value_tokens, "key_value", f.region, raw=f.raw,
                                         label=f.label)
@@ -953,6 +1010,8 @@ def build_generic(binder, st: Structure, template_used: bool, start_rel: int) ->
             attr = binder.make_attr(value, f.label_tokens, f.value_tokens, "key_value", f.region, raw=f.raw,
                                     label=f.label)
             _generic_flags(binder, attr, f.raw, vtype, f.continued)
+            if not f.below:
+                _pairing_flags(attr, f.label_tokens, f.value_tokens)
             if f.named_by_field:
                 attr.notes.append("no printed label: named after the form field's own description")
                 attr.field_label = f.label
@@ -964,6 +1023,18 @@ def build_generic(binder, st: Structure, template_used: bool, start_rel: int) ->
     # tables
     for gt in st.tables:
         headers = [(f"c{i}", tx, seg) for i, (tx, seg) in enumerate(gt.header)]
+        # on a scan, a 'table' whose values do not line up under its headings is most
+        # often a form read as a grid: its cells are offered for review, not passed as read
+        placed = []
+        for row in gt.rows:
+            for key, tx, seg in headers:
+                c = row.cells.get(key)
+                words = [t for t in (c.all_tokens if c else []) if t.kind == "word"]
+                if words and seg and all(t.source == "ocr" for t in words):
+                    hs = sorted(t.height for t in words + list(seg))
+                    placed.append((id(c), _aligned(words, list(seg), max(6.0, 0.8 * hs[len(hs) // 2]))))
+        loose = {cid for cid, ok in placed if not ok}
+        grid_doubt = bool(placed) and sum(ok for _, ok in placed) < 0.9 * len(placed)
         for row in gt.rows:
             cells = [(key, tx, seg, row.cells.get(key)) for key, tx, seg in headers]
             filled = [(k, tx, seg, c) for k, tx, seg, c in cells if c and c.text]
@@ -985,6 +1056,11 @@ def build_generic(binder, st: Structure, template_used: bool, start_rel: int) ->
                     attr.confidence = min(attr.confidence, 0.55)
                     attr.notes.append("value continues on a following line with no row key; merged into the row above")
                 _generic_flags(binder, attr, c.text, vtype, False)
+                if attr.status == "valid" and (grid_doubt or id(c) in loose):
+                    attr.status = "needs_review"
+                    attr.notes.append(f"'{c.text[:30]}' does not line up under the heading '{tx}'" if id(c) in loose else
+                                      "the values of this table do not line up under its headings - it may be a form "
+                                      "read as a grid")
                 ent.attributes[slug(tx) or k] = attr
             contains(gt.region, ent, ent.attributes[next(iter(ent.attributes))], f"row {row.index} of the table")
             leftovers["table_rows"] += 1
