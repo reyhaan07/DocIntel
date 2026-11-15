@@ -38,8 +38,9 @@ def test_tilted_receipt_photo(tmp_path):
     page = doc["document"]["pages"][0]
     assert doc["document"]["document_type"] == "receipt"
     assert abs(page["deskew_angle"]) > 2  # levelled from the words, not left tilted
-    # the amount at the far end of the TOTAL line, not the CASH amount one line below it
-    assert kf["total"]["value"] == "103,400"
+    # the amount at the far end of the TOTAL line, not the CASH amount one line below it; an
+    # OCR version that reads only '103' of it gets it back from subtotal + tax = cash - change
+    assert kf["total"]["value"] == "103,400" and kf["total"]["status"] == "valid"
     assert kf["subtotal"]["value"] == "94,000" and kf["cash"]["value"] == "110,000"
     assert kf["merchant"]["status"] == "needs_review"  # a name read by OCR with no label
 
@@ -102,3 +103,22 @@ def test_fillable_insurance_claim(tmp_path):
     assert doc["document"]["extraction_method"] == "form_fields"
     kf = _facts(doc)
     assert kf["policy_number"] == "EVG-55-210984" and kf["claim_number"] == "CLM-0091237" and kf["insured"] == "Amara Okafor"
+
+
+def test_a_total_read_in_part_comes_back_from_the_receipts_sums():
+    """Tesseract 5.4.0 reads the receipt's bold total '103,400' as '103'."""
+    from docintel.profiles import _check_sums
+
+    def f(v, st="valid"):
+        return {"value": v, "status": st, "label": "x", "notes": []}
+
+    out = {"subtotal": f("94,000"), "tax": f("9,400", "needs_review"), "total": f("103", "needs_review"),
+           "cash": f("110,000"), "change": f("6,600")}
+    _check_sums(out)
+    assert out["total"]["value"] == "103,400" and out["total"]["status"] == "valid"  # two separate sums agree
+    out = {"subtotal": f("94,000"), "tax": f("9,400"), "total": f("103", "needs_review")}
+    _check_sums(out)
+    assert out["total"]["value"] == "103,400" and out["total"]["status"] == "needs_review"  # one sum: review
+    out = {"subtotal": f("94,000"), "tax": f("9,400"), "total": f("98,500")}
+    _check_sums(out)
+    assert out["total"]["value"] == "98,500"  # a different total is not a cut-off one: left as read

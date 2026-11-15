@@ -859,6 +859,33 @@ def _check_sums(out: dict) -> None:
         if d and (d > today or d < "1900-01-01") and out[f].get("status") == "valid":
             flag(f, f"the date {out[f]['value']} lies in the future" if d > today else "the year is implausible")
     total, sub, tax, cash, change = num("total"), num("subtotal"), num("tax"), num("cash"), num("change")
+    # a total OCR read only in part ('103' for '103,400'), or not at all, is recovered from
+    # the receipt's own arithmetic: subtotal + tax.  It stands as read only when cash -
+    # change, read independently, gives the same amount; otherwise it goes to review
+    if sub is not None and tax is not None and tax > 0:
+        summed = sub + tax
+        read = re.sub(r"\D", "", str(out["total"]["value"])) if "total" in out else ""
+        whole = re.sub(r"\D", "", _like(out["subtotal"]["value"], summed))
+        cut = bool(read) and total is not None and abs(total - summed) >= 0.001 and len(read) < len(whole) \
+            and whole.startswith(read)
+        if cut or "total" not in out:
+            paid = cash is not None and change is not None and cash > change and abs(cash - change - summed) < 0.001 \
+                and out["cash"]["status"] == "valid" and out["change"]["status"] == "valid"
+            note = (f"read as '{out['total']['value']}' (OCR lost the rest)" if cut else "the total line was not read") + \
+                f"; subtotal {out['subtotal']['value']} + tax {out['tax']['value']} = {_like(out['subtotal']['value'], summed)}"
+            if paid:
+                note += f", and cash {out['cash']['value']} - change {out['change']['value']} gives the same"
+                for f in ("subtotal", "tax"):  # two separate readings agree: both parts were read right
+                    if out[f]["status"] != "valid":
+                        out[f]["status"] = "valid"
+                        out[f].setdefault("notes", []).append("confirmed: subtotal + tax = cash - change")
+            base = out.get("total") or out["subtotal"]
+            out["total"] = {**{k: base.get(k) for k in ("page", "bbox", "entity", "attribute")},
+                            "value": _like(out["subtotal"]["value"], summed), "raw": base.get("raw") if cut else None,
+                            "label": out["total"]["label"] if cut else "subtotal + tax",
+                            "method": "worked out from the receipt's sums", "status": "valid" if paid else "needs_review",
+                            "notes": [note]}
+            total = summed
     # the receipt's own arithmetic confirms a reading the reader was unsure of: when the
     # printed numbers add up exactly, each of them was read right
     def confirm(names, note):
@@ -868,10 +895,12 @@ def _check_sums(out: dict) -> None:
                     out[n]["status"] = "valid"
                     out[n].setdefault("notes", []).append(f"confirmed: {note}")
 
-    if total is not None and sub is not None and tax is not None and tax > 0 and abs(sub + tax - total) < 0.001:
+    derived = ("worked out from the receipt's sums", "worked out from the payment")
+    if total is not None and sub is not None and tax is not None and tax > 0 and abs(sub + tax - total) < 0.001 \
+            and out["total"].get("method") not in derived:  # a total worked out from the sum cannot confirm it
         confirm(("subtotal", "tax", "total"), "subtotal + tax = total")
     if total is not None and cash is not None and change is not None and cash > change and \
-            abs(cash - change - total) < 0.001 and out["total"].get("method") != "worked out from the payment":
+            abs(cash - change - total) < 0.001 and out["total"].get("method") not in derived:
         confirm(("cash", "change", "total"), "cash - change = total")
     if total is not None and tax is not None and tax > 0 and total <= tax + 0.001:
         flag("total", f"not more than the tax {out['tax']['value']}")

@@ -204,7 +204,8 @@ def test_words_lost_by_another_ocr_version_are_flagged_not_silent(monkeypatch):
                     drop |= {id(u) for u in row(t) if u.text in ("Living", "63")}
                 if "email" in t.text.lower() and any(u.text == "contact" for u in row(t)):
                     drop |= {id(u) for u in row(t) if u.text in ("you", "by") or "email" in u.text.lower()}
-            assert len(drop) == 5
+            # some OCR versions never read these words at all (Tesseract 5.4.0): then there is
+            # nothing to remove, and the same checks below must hold all the same
             page.tokens = [t for t in page.tokens if id(t) not in drop]
         return page
 
