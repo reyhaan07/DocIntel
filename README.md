@@ -127,6 +127,12 @@ pure Python (standard library); nothing is sent anywhere.
 
 ## Quick start
 
+**Step by step for Windows, macOS and Linux: [`HOW_TO_RUN.md`](HOW_TO_RUN.md).** In short:
+install Python 3.10+ and Tesseract, then double-click `run_windows.bat` (Windows) or run
+`./run_mac_linux.sh` (macOS / Linux). The browser opens at http://localhost:8000.
+
+Or by hand:
+
 ```bash
 # Python 3.10+
 pip install -e .
