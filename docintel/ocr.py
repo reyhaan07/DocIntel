@@ -399,7 +399,8 @@ def fix_digit_letters(text: str) -> str:
     return out if re.sub(r"[^A-Za-z]", "", out) or re.search(r"\d", text) else text
 
 
-def _tesseract_words(img, config: str, page_number: int, scale: float = SCALE) -> list[Token]:
+def _tesseract_words(img, config: str, page_number: int, scale: float = SCALE,
+                     lines: dict | None = None) -> list[Token]:
     import os
 
     import pytesseract
@@ -421,6 +422,10 @@ def _tesseract_words(img, config: str, page_number: int, scale: float = SCALE) -
         w = w * (1 - trim)
         top = data["top"][i] / scale
         bottom = top + data["height"][i] / scale
+        if lines is not None and conf > 0.5:  # word centres per printed line, to measure the tilt
+            key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+            lines.setdefault(key, []).append((data["left"][i] + data["width"][i] / 2,
+                                              data["top"][i] + data["height"][i], data["height"][i]))
         for piece, f0, f1 in _split_glued(text):
             fixed = fix_digit_letters(piece)
             out.append(Token(fixed, x0 + w * f0, top, x0 + w * f1, bottom, page_number, "ocr", conf=conf,
@@ -501,6 +506,33 @@ def detect_rotation(img) -> int:
     return rot if rot in (90, 180, 270) and float(osd.get("orientation_conf", 0)) >= 2.0 else 0
 
 
+def _tilt(lines: dict) -> float:
+    """Angle (degrees, PIL rotate sense) that levels the printed lines, from the bottoms
+    of the words Tesseract placed on each line: the median slope of the lines with three
+    or more words, 0 when fewer than four such lines agree."""
+    import math
+
+    slopes = []
+    for words in lines.values():
+        if len(words) < 3:
+            continue
+        xs = [w[0] for w in words]
+        ys = [w[1] for w in words]
+        mx, my = sum(xs) / len(xs), sum(ys) / len(ys)
+        den = sum((x - mx) ** 2 for x in xs)
+        if den <= 0 or max(xs) - min(xs) < 6 * max(w[2] for w in words):
+            continue
+        slopes.append(sum((x - mx) * (y - my) for x, y in zip(xs, ys)) / den)
+    if len(slopes) < 4:
+        return 0.0
+    slopes.sort()
+    mid = slopes[len(slopes) // 2]
+    near = [x for x in slopes if abs(x - mid) < 0.02]
+    if len(near) < 0.6 * len(slopes):
+        return 0.0  # the lines do not agree (curled paper): leave the page as it is
+    return round(math.degrees(math.atan(sum(near) / len(near))), 2)
+
+
 def _mean_conf(tokens: list[Token]) -> float:
     w = [(len(t.text), t.conf) for t in tokens if t.kind == "word" and t.text.strip()]
     n = sum(a for a, _ in w)
@@ -508,7 +540,7 @@ def _mean_conf(tokens: list[Token]) -> float:
 
 
 def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float, *, deskew: bool = True,
-             orient: bool = True, _rotation: int | None = None) -> OcrPage:
+             orient: bool = True, _rotation: int | None = None, _angle: float | None = None) -> OcrPage:
     import numpy as np
     from PIL import Image
 
@@ -525,7 +557,10 @@ def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float
     # page, print made of dots - they cost more words than they save (measured on receipt
     # photos: 57 % of the words read without them, 40 % with them)
     img, evened = even_out_lighting(img)
-    angle = estimate_skew(img) if deskew and not evened else 0.0
+    if _angle is not None:
+        angle = _angle
+    else:
+        angle = estimate_skew(img) if deskew and not evened else 0.0
     if angle:
         img = img.rotate(angle, resample=Image.BICUBIC, fillcolor=255)
     page_arr = np.asarray(img)
@@ -542,8 +577,18 @@ def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float
     work, scale = clean_img, SCALE
     if evened:
         # photos come at any distance: words are read best about 32 pixels high, so a first
-        # single-column pass measures the print and the page is read again at that size
-        probe = _tesseract_words(clean_img, "--psm 4", page_number)
+        # single-column pass measures the print and the page is read again at that size.
+        # The same pass measures the tilt from the words themselves (the ink profile is
+        # fooled by the table or hand around the paper): a tilted photo is levelled first,
+        # or a label and its amount at the far end of the line drift apart by a line
+        found: dict = {}
+        probe = _tesseract_words(clean_img, "--psm 4", page_number, lines=found)
+        if deskew and _angle is None:
+            tilt = _tilt(found)
+            if abs(tilt) >= 0.4:
+                return ocr_page(pdf_path, page_number, width if not rotation or rotation == 180 else height,
+                                height if not rotation or rotation == 180 else width, deskew=deskew, orient=orient,
+                                _rotation=rotation, _angle=tilt)
         hs = sorted(t.height * SCALE for t in probe if t.conf > 0.6 and len(t.text) >= 3)
         med = hs[len(hs) // 2] if len(hs) >= 5 else 0
         if med > 40:

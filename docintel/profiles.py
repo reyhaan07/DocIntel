@@ -608,12 +608,15 @@ def _value_part(rest: str) -> str:
     first piece that carries a digit, unless another label comes before it."""
     if " | " not in rest:
         return rest
+    taken: list[str] = []
     for piece in rest.split(" | "):
-        if re.search(r"\d", piece):
-            return piece
         if len(re.findall(r"[A-Za-z]{3,}", re.sub(_CUR, "", piece))) >= 1:
-            return ""  # the next label comes first: this one's amount is not on the line
-    return ""
+            break  # the next label: this one's amounts end here
+        if re.search(r"\d", piece):
+            taken.append(piece)
+    # several amounts on the row ('Total | $ 203,59 | $ 20,36 | $ 224,95') are all handed
+    # on, so the reader takes the last and sends it to review
+    return " ".join(taken)
 
 
 def key_facts(doc: dict, printed_lines: list[dict] | None = None) -> dict:
@@ -867,6 +870,20 @@ def _check_sums(out: dict) -> None:
                         out["change"]["status"] == "valid" else "needs_review",
                         "notes": [f"cash {out['cash']['value']} - change {out['change']['value']}"
                                   + ("; equals the subtotal" if agrees else "; the total line itself was not read")]}
+    # the receipt's own arithmetic confirms a reading the reader was unsure of: when the
+    # printed numbers add up exactly, each of them was read right
+    def confirm(names, note):
+        if all(n in out for n in names) and any(out[n]["status"] != "valid" for n in names):
+            for n in names:
+                if out[n]["status"] != "valid":
+                    out[n]["status"] = "valid"
+                    out[n].setdefault("notes", []).append(f"confirmed: {note}")
+
+    if total is not None and sub is not None and tax is not None and tax > 0 and abs(sub + tax - total) <= 0.011:
+        confirm(("subtotal", "tax", "total"), "subtotal + tax = total")
+    if total is not None and cash is not None and change is not None and cash > change and \
+            abs(cash - change - total) <= 0.011 and out["total"].get("method") != "worked out from the payment":
+        confirm(("cash", "change", "total"), "cash - change = total")
     if total is not None and sub is not None:
         ok = abs(sub - total) <= 0.011 or (tax is not None and abs(sub + tax - total) <= 0.051)
         if not ok and sub > total + 0.011:
