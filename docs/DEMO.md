@@ -26,7 +26,8 @@ invented.
 `python samples/demo/make_demo.py` rebuilds them (needs `pip install python-docx openpyxl`).
 
 **A ready-made recording.** `samples/demo/video/` records the whole demo by itself, like a
-screen recording: for each document the original opens in its own window (PDF reader,
+screen recording: it opens with the app being started from a command window
+(`run_windows.bat`), then for each document the original opens in its own window (PDF reader,
 Photos, Word, Excel, Mail) and is scrolled through, then **Upload files** is clicked, the
 file is picked in the Open dialog, and the result is shown. The steps are at the top of
 `samples/demo/video/record.js`; it writes a 1920 x 1080 WebM and `scenes.json` with the
@@ -67,7 +68,7 @@ Check: `tesseract --version` prints a version.
 ### Check that everything works
 
 ```bash
-python -m pytest -q                       # 98 tests, all pass
+python -m pytest -q                       # 108 tests, all pass
 python samples/demo/make_demo.py          # (optional) rebuilds the two demo files
 ```
 

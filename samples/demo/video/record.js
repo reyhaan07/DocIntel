@@ -1,12 +1,15 @@
-// Screen-recording style demo: for each document, open the original in its own program,
-// scroll through it, close it; click Upload files, pick it in the Open dialog; then show
-// what docintel read.  The document windows and the Open dialog are drawn inside the
-// page (a headless browser cannot film the real ones).
+// Screen-recording style demo: start the app from a command window; then for each document,
+// open the original in its own program, scroll through it, close it; click Upload files,
+// pick it in the Open dialog; then show what docintel read.  The command window, the
+// document windows and the Open dialog are drawn inside the page (a headless browser
+// cannot film the real ones).
 //
 //   python -I samples/demo/video/previews.py . samples/demo/video/prev   (needs LibreOffice for the Word preview)
-//   python -m docintel serve --data demo_data --no-seed
-//   node samples/demo/video/record.js out            (Node.js with Playwright)
+//   python -m docintel serve --data demo_data            (a new folder: the 7 sample forms are read first)
+//   node samples/demo/video/record.js out                (Node.js with Playwright)
 //   ffmpeg -i out/*.webm -c:v libx264 -crf 21 -pix_fmt yuv420p docintel_demo.mp4
+// out/scenes.json holds each scene's start time and caption, for subtitles.
+// The command window shows term_lines.txt (the server's own start-up lines); TERM_LINES=file replaces it.
 const { chromium } = require('playwright');
 const fs = require('fs');
 const path = require('path');
@@ -17,6 +20,17 @@ const URL = process.env.APP || 'http://localhost:8000/';
 const PREV = process.env.PREV || path.join(__dirname, 'prev');
 const OUT = process.argv[2] || path.join(__dirname, 'out');
 const FOLDERS = JSON.parse(fs.readFileSync(path.join(PREV, 'folders.json'), 'utf8'));
+const TERM_FILE = process.env.TERM_LINES || path.join(__dirname, 'term_lines.txt');
+const TERM_LINES = (fs.existsSync(TERM_FILE) ? fs.readFileSync(TERM_FILE, 'utf8') : '').split('\n').filter((l) => l.trim());
+const TERM_STYLE = `
+.__term { width: 1180px; height: 640px; background: #0c0c0c; border-radius: 9px; overflow: hidden; display: flex;
+  flex-direction: column; box-shadow: 0 24px 70px rgba(0,0,0,.6); }
+.__ttb { height: 38px; background: #202020; display: flex; align-items: center; color: #ddd; font-size: 12.5px; }
+.__ttab { background: #0c0c0c; height: 38px; display: flex; align-items: center; padding: 0 18px; border-radius: 8px 8px 0 0;
+  margin-left: 8px; margin-top: 6px; }
+.__tb2 { width: 46px; text-align: center; color: #bbb; }
+.__tbody { flex: 1; margin: 0; padding: 14px 18px; color: #cccccc; font: 15px/1.45 "Cascadia Mono", Consolas, "DejaVu Sans Mono", monospace;
+  white-space: pre-wrap; overflow: hidden; }`;
 
 function content(row) {
   const p = row.preview;
@@ -111,6 +125,31 @@ function dialogSelect(a) {
   p.innerHTML = a.html ? `<div class="mini">${a.html}</div>` : `<img src="${a.src}">`;
 }
 
+function openTerminal() {
+  const root = window.__host('__term');
+  const d = document.createElement('div');
+  d.className = 'wrap __show';
+  d.innerHTML = `<div class="__term"><div class="__ttb"><span class="__ttab">⊞&nbsp; Command Prompt</span><span style="flex:1"></span>
+    <span class="__tb2">—</span><span class="__tb2">▢</span><span class="__tb2">✕</span></div><pre class="__tbody"></pre></div>`;
+  root.appendChild(d);
+}
+
+function termWrite(text) {
+  const b = document.getElementById('__term').shadowRoot.querySelector('.__tbody');
+  b.textContent += text;
+}
+
+function closeTerminal() {
+  const t = document.getElementById('__term');
+  if (t) t.remove();
+}
+
+function desktop() {
+  document.body.style.margin = '0';
+  document.body.style.height = '100vh';
+  document.body.style.background = 'radial-gradient(circle at 30% 40%, #2b5876 0%, #1b2a49 45%, #0f1626 100%)';
+}
+
 function closeDialog() {
   const d = document.getElementById('__dlg');
   if (d) d.remove();
@@ -135,7 +174,7 @@ function closeDialog() {
   const ease = (u) => (u < 0.5 ? 2 * u * u : 1 - Math.pow(-2 * u + 2, 2) / 2);
   async function moveTo(x, y, ms) {
     const d = Math.hypot(x - cur.x, y - cur.y);
-    ms = ms || Math.min(1100, 350 + d * 0.55);
+    ms = ms || Math.min(650, 220 + d * 0.33);
     const n = Math.max(8, Math.round(ms / 16));
     const sx = cur.x, sy = cur.y;
     const bend = (Math.random() - 0.5) * Math.min(80, d * 0.15);
@@ -158,8 +197,8 @@ function closeDialog() {
     await moveTo(b.x + b.width * dx + (Math.random() - 0.5) * 6, b.y + b.height * dy + (Math.random() - 0.5) * 4);
   }
   async function press(after = 600) {
-    await pause(140 + Math.random() * 120);
-    await page.mouse.down(); await pause(70); await page.mouse.up();
+    await pause(90 + Math.random() * 70);
+    await page.mouse.down(); await pause(60); await page.mouse.up();
     await pause(after);
   }
   async function click(loc, opts = {}) {
@@ -179,6 +218,22 @@ function closeDialog() {
   const fact = (name) => page.locator('.tabbody .blk.bf', { has: page.locator('.lab', { hasText: new RegExp('^' + name + '$') }) }).first();
   const safe = async (fn) => { try { await fn(); } catch (e) { console.log('  (skipped: ' + e.message.split('\n')[0] + ')'); } };
 
+  // how the program is started: run_windows.bat in a command window, then the browser opens
+  await page.goto('about:blank');
+  await page.evaluate(desktop);
+  await page.evaluate(pageSetup, STYLE + TERM_STYLE);
+  await page.mouse.move(cur.x, cur.y);
+  await pause(800);
+  scene('Starting docintel: double-click run_windows.bat (or ./run_mac_linux.sh) - it sets everything up and opens the browser');
+  await page.evaluate(openTerminal);
+  await page.evaluate(termWrite, 'Microsoft Windows [Version 10.0.22631]\n(c) Microsoft Corporation. All rights reserved.\n\nD:\\DocIntel>');
+  await pause(900);
+  for (const ch of 'run_windows.bat') { await page.evaluate(termWrite, ch); await pause(70 + Math.random() * 60); }
+  await pause(500);
+  await page.evaluate(termWrite, '\n\ndocintel is starting at http://localhost:8000  - close this window to stop it.\n\n');
+  await pause(900);
+  for (const ln of TERM_LINES) { await page.evaluate(termWrite, ln + '\n'); await pause(ln.startsWith('processing') ? 380 : 600); }
+  await pause(1500);
   await page.goto(URL);
   await page.evaluate(pageSetup, STYLE);
   await page.addScriptTag({ content: `window.__dlgRender = ${dialogRender.toString()};` });
@@ -264,7 +319,7 @@ function closeDialog() {
 
   // ------------------------------------------------------------------ script
   await pause(1200);
-  scene('docintel - reads any document on your own computer: no AI model, no cloud service');
+  scene('docintel - reads any document on your own computer: no AI model, no cloud service (7 sample forms are read on the first start)');
   await moveTo(1250, 430); await pause(500); await moveTo(1500, 200); await pause(700);
 
   await demo('demo', '01_invoice.pdf', '1  Invoice (PDF): number, date, seller and client blocks, totals', async () => {

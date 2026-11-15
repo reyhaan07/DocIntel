@@ -131,6 +131,9 @@ pure Python (standard library); nothing is sent anywhere.
 install Python 3.10+ and Tesseract, then double-click `run_windows.bat` (Windows) or run
 `./run_mac_linux.sh` (macOS / Linux). The browser opens at http://localhost:8000.
 
+How it reads a document and builds the relationships between what it finds, with a worked
+example: open [`docs/how_it_works.html`](docs/how_it_works.html) in a browser.
+
 Or by hand:
 
 ```bash

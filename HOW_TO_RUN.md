@@ -99,5 +99,6 @@ python -m docintel serve --port 8010                  # use another port if 8000
 | start over with an empty list | stop the app, delete the `docintel_data` folder, start again |
 | `./run_mac_linux.sh: Permission denied` | run `chmod +x run_mac_linux.sh` once, or start it with `bash run_mac_linux.sh` |
 
-More detail: `README.md` (how it works, accuracy results) and `docs/DEMO.md` (a guided
-demo, scene by scene).
+More detail: **`docs/how_it_works.html`** (open it in a browser: how docintel reads a
+document and builds the relationships between what it finds, with a worked example),
+`README.md` (accuracy results) and `docs/DEMO.md` (a guided demo, scene by scene).

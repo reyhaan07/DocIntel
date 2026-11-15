@@ -1,0 +1,9 @@
+OCR for scanned pages: tesseract 5.3.4 (local)
+processing sample 1/7: intake_A_fillable_okafor.pdf
+processing sample 2/7: intake_B_flattened_lindqvist.pdf
+processing sample 3/7: intake_C_other_clinic_rivera.pdf
+processing sample 4/7: intake_D_scanned_rivera.pdf
+processing sample 5/7: intake_E_scanned_lindqvist.pdf
+processing sample 6/7: invoice_northwind.pdf
+processing sample 7/7: lab_report_harper.pdf
+docintel web app at http://localhost:8000
