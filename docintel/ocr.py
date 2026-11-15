@@ -482,15 +482,21 @@ def detect_rotation(img) -> int:
     return rot if rot in (90, 180, 270) and float(osd.get("orientation_conf", 0)) >= 2.0 else 0
 
 
+def _mean_conf(tokens: list[Token]) -> float:
+    w = [(len(t.text), t.conf) for t in tokens if t.kind == "word" and t.text.strip()]
+    n = sum(a for a, _ in w)
+    return sum(a * c for a, c in w) / n if n else 0.0
+
+
 def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float, *, deskew: bool = True,
-             orient: bool = True) -> OcrPage:
+             orient: bool = True, _rotation: int | None = None) -> OcrPage:
     import numpy as np
     from PIL import Image
 
     from .render import render_page_gray
 
     img = render_page_gray(pdf_path, page_number, scale=SCALE)
-    rotation = detect_rotation(img) if orient else 0
+    rotation = _rotation if _rotation is not None else (detect_rotation(img) if orient else 0)
     if rotation:
         img = img.rotate(-rotation, expand=True, fillcolor=255)
         if rotation in (90, 270):
@@ -510,6 +516,13 @@ def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float
     with ThreadPoolExecutor(max_workers=len(TESSERACT_PASSES)) as pool:
         passes = list(pool.map(lambda cfg: _tesseract_words(clean_img.copy(), cfg, page_number), TESSERACT_PASSES))
     tokens = _merge_passes(passes)
+    if orient and _rotation is None and rotation in (0, 180) and len(tokens) >= 15 and _mean_conf(tokens) < 0.6:
+        # orientation detection is unreliable on small or faint print: a page that reads
+        # poorly is read once more upside down, and kept that way if it reads far better
+        flipped = _tesseract_words(clean_img.rotate(180), "--psm 6", page_number)
+        if len(flipped) >= 15 and _mean_conf(flipped) > _mean_conf(tokens) + 0.15:
+            return ocr_page(pdf_path, page_number, width if rotation == 0 else width, height, deskew=deskew,
+                            orient=orient, _rotation=(rotation + 180) % 360)
     boxes, drop = find_checkboxes(page_arr, tokens, page_number)
     drop_ids = {id(t) for t in drop}
     tokens = [t for t in tokens if id(t) not in drop_ids] + boxes

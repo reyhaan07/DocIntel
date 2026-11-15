@@ -266,27 +266,53 @@ work still ahead: each one is a case where docintel cannot yet see its own doubt
 
 ## Document types and key facts
 
-Every document gets a type from the words on its first page (headings count most), with
-the words that decided it in `document_type_basis`. 26 types are known: invoice, receipt,
-bank statement, payslip, utility bill, lab report, prescription, discharge summary,
-purchase order, contract, letter, memo, e-mail, resume, meeting minutes, insurance, tax
-form, referral, questionnaire, scientific publication, report, specification, budget,
+Every document gets a type from its first page, with the evidence in
+`document_type_basis`. 28 types are known: invoice, receipt, bank statement, payslip,
+utility bill, lab report, prescription, discharge summary, purchase order, contract,
+letter, memo, e-mail, fax cover sheet, press release, resume, meeting minutes, insurance,
+tax form, referral, questionnaire, scientific publication, report, specification, budget,
 news article, advertisement, presentation and form (see `docintel/profiles.py`).
 
-For types with key facts, `key_facts` names them with their source:
+How the type is decided:
+
+- the words are read in reading order (OCR hands them back by confidence), with a break
+  between columns so that no phrase is read across a gap;
+- a phrase that *names* a type ("Invoice", "Memorandum", "Statement of Account",
+  "Dear ...", "Sincerely") counts 4 in the title or a heading and 2 in the text; words a
+  type merely shares with others ("total", "summary") count 2 and 1;
+- the title is the larger, bold or capitals lines in the top third of page 1;
+- memos and e-mails share their header lines (To:, From:, Subject:); an e-mail address
+  or a time stamp in the From line, or a Sent: line, makes it an e-mail;
+- a page with almost no text, or nothing that names a type, is `unknown` and says why;
+- an e-mail, letter or memo that carries a business document (an invoice in the body
+  of an e-mail) keeps its own type and names the carried one in `carries`; the key
+  facts of both are read.
+
+For types with key facts, `key_facts` names each one with its source and a status:
 
 ```json
 "key_facts": {
-  "invoice_number": {"value": "INV-20931", "label": "Invoice Number", "method": "labelled value", "status": "valid", "page": 1, "bbox": [...]},
-  "total":          {"value": "$307.80",   "label": "Total Due",      "method": "labelled value", "status": "valid", ...}
+  "invoice_number": {"value": "97159829", "label": "Invoice no", "method": "labelled value", "status": "valid", "page": 1, "bbox": [...]},
+  "seller": {"value": "Bradley-Andrade, 9879 Elizabeth Common, Lake Jonathan, RI 12335", "label": "Seller", ...},
+  "total":  {"value": "$978,12", "label": "Total / Gross worth", "method": "table row", "status": "valid", ...}
 }
 ```
 
-A fact comes from a labelled value first; then from a line that starts with the fact's
-name and ends with a value of its kind (`TOTAL   9.00` on a receipt); the issuer (merchant,
-seller) from the document's first line when it names an organisation. Conflicting values,
-or a guess from a weaker rule, go to review. The type is only a label: nothing is read
-differently because of it.
+A fact comes from a labelled value first (including 'Seller:' / 'Bill To:' labels printed
+over a name-and-address block), then from the 'Total' row of a table (the amount in its
+total column), then from a line that starts with the fact's name (`TOTAL   9.00` on a
+receipt), and the issuer from a line at the top that names a company. Amounts are read
+token by token, and anything uncertain goes to review rather than being passed as read:
+
+- a line holding several amounts, or words next to the amount (`GST 5.71` under 'Total');
+- a decimal point OCR dropped (`88 17` is offered as 88.17, flagged);
+- a whole number where the document's other amounts carry cents;
+- a date with stray characters (`*3/01/2018`);
+- a total that disagrees with the document's own arithmetic (cash − change, a subtotal
+  larger than the total);
+- an issuer taken from the first line when that line does not name a company.
+
+The type is only a label: nothing on the page is read differently because of it.
 
 ## Templates
 

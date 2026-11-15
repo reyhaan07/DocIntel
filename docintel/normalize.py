@@ -6,6 +6,12 @@ from datetime import date
 
 _MONTHS = {m: i + 1 for i, m in enumerate(
     ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"])}
+# German, French, Spanish, Dutch, Italian and Portuguese month names (first three letters,
+# accents removed) where they differ from English
+_MONTHS.update({"jän": 1, "mär": 3, "mai": 5, "okt": 10, "dez": 12, "janv": 1, "fév": 2, "fev": 2, "avr": 4,
+                "mai": 5, "jui": 6, "aoû": 8, "aou": 8, "déc": 12, "ene": 1, "abr": 4, "ago": 8, "dic": 12,
+                "mrt": 3, "mei": 5, "gen": 1, "mag": 5, "giu": 6, "lug": 7, "set": 9, "ott": 10, "fev": 2,
+                "out": 10, "dez": 12})
 
 
 def clean(text: str | None) -> str:
@@ -69,13 +75,15 @@ def parse_date(text: str, order: str = "mdy") -> str | None:
                 mo, d = d, mo
         else:
             m = re.fullmatch(r"([A-Za-z]{3,})\.?\s+(\d{1,2})(?:st|nd|rd|th)?,?\s+(\d{4})", t)
-            m2 = re.fullmatch(r"(\d{1,2})(?:st|nd|rd|th)?\s+([A-Za-z]{3,})\.?,?\s+(\d{4})", t)
+            m2 = re.fullmatch(r"(\d{1,2})(?:st|nd|rd|th|\.)?(?:\s+|-)(?:de\s+)?([^\W\d_]{3,})\.?,?(?:\s+|-)(?:de\s+)?(\d{4}|\d{2})", t)
             if m:
                 mo = _MONTHS.get(m.group(1)[:3].lower())
                 d, y = int(m.group(2)), int(m.group(3))
             elif m2:
-                mo = _MONTHS.get(m2.group(2)[:3].lower())
+                mo = _MONTHS.get(m2.group(2)[:3].lower()) or _MONTHS.get(m2.group(2)[:4].lower())
                 d, y = int(m2.group(1)), int(m2.group(3))
+                if y < 100:  # '08-May-22'
+                    y += 1900 if y > 30 else 2000
             else:
                 return None
             if not mo:

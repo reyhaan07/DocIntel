@@ -104,6 +104,12 @@ def _holds_label(raw: str) -> bool:
     first = re.split(r"[\s:.]+", t, maxsplit=1)
     if len(first) == 2 and first[1] and first[0].lower() in _ID_LABELS | _CONTACT_LABELS:
         return True
+    lead = re.split(r"\d", t, maxsplit=1)
+    if len(lead) == 2 and lead[1]:
+        words = re.findall(r"[A-Za-z]+", lead[0])
+        named = [w for w in words if w.lower() in LABEL_WORDS - {"of", "and", "the", "for", "to", "by"}]
+        if len(named) >= 2 and len(named) >= 0.6 * len(words):
+            return True  # 'ZIP Code/Postal Code 37075'
     return False
 
 
@@ -149,6 +155,11 @@ def _generic_flags(binder, attr: Attribute, raw: str, vtype: str, continued: boo
     if ocr and attr.status == "valid" and _reads_like_label(raw):
         # on a scan, a 'value' made of field names is most likely the next label over an empty box
         attr.notes.append(f"the value '{raw}' reads like another label; the field may be empty - confirm")
+        attr.status = "needs_review"
+    flabel = getattr(attr, "field_label", "") or ""
+    if attr.status == "valid" and PHONE_LABEL.search(flabel) and vtype != "phone" and \
+            0 < len(re.sub(r"\D", "", raw or "")) < 7 and not re.search(r"[A-Za-z]{3}", raw or ""):
+        attr.notes.append(f"'{raw}' has too few digits for a phone number - part of it may be missing")
         attr.status = "needs_review"
     if attr.status == "valid" and _holds_label(raw):
         attr.notes.append(f"the value '{raw[:40]}' holds what reads as another field's label - confirm")
@@ -1207,6 +1218,12 @@ def guess_document_type(binder) -> tuple[str | None, str, str | None]:
     labels = sum(1 for t in words if t.text.endswith(":") and len(t.text) > 2)
     head = " | ".join(heads)
     dtype, basis, _ = classify(head, body, n_fields=labels, n_words=len(words))
+    ocr = [t for t in words if t.source == "ocr"]
+    if dtype is None and len(ocr) >= 15:
+        conf = sum(t.conf * len(t.text) for t in ocr) / max(1, sum(len(t.text) for t in ocr))
+        if conf < 0.6:
+            basis = (f"the page reads poorly (handwriting, a photo or a faint scan: OCR confidence "
+                     f"{conf:.0%}), and nothing read names a document type")
     return dtype, basis, carried_type(head, body, dtype)
 
 

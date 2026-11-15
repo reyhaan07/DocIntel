@@ -23,7 +23,7 @@ from .normalize import parse_date
 from .template import canon_tokens
 
 MONEY = r"(?:[A-Z]{3}|RM|Rp\.?|Rs\.?|[$€£¥₹])?\s*-?\d{1,3}(?:[,.\s]\d{3})*(?:[.,]\d{1,2})?|-?\d+(?:[.,]\d{1,2})?"
-DATE_RX = (r"\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}[\s\-][A-Za-z]{3,9}[\s\-,]+\d{2,4}"
+DATE_RX = (r"\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}|\d{4}-\d{2}-\d{2}|\d{1,2}\.?[\s\-][^\W\d_]{3,9}\.?[\s\-,]+\d{2,4}"
            r"|[A-Za-z]{3,9}\.?\s+\d{1,2},?\s+\d{4}")
 
 # kind -> (value pattern, kind words)
@@ -35,15 +35,21 @@ PROFILES: dict[str, dict] = {
                   "remit to", "due date", "balance due", "invoice date", "ship to", "sold to"],
         "facts": {
             "invoice_number": ("id", ["invoice number", "invoice no", "invoice #", "invoice", "inv no", "bill no",
-                                      "bill number", "document no", "reference"]),
-            "invoice_date": ("date", ["invoice date", "date of issue", "issue date", "date issued", "billing date", "date"]),
+                                      "bill number", "document no", "reference", "rechnungsnr", "rechnungsnummer",
+                                      "rechnung nr", "facture no", "numero de facture", "factura no", "factura n",
+                                      "numero de factura", "fattura n", "factuurnummer"]),
+            "invoice_date": ("date", ["invoice date", "date of issue", "issue date", "date issued", "billing date", "date",
+                                      "rechnungsdatum", "datum", "date de facture", "fecha de factura", "fecha",
+                                      "data fattura", "factuurdatum"]),
             "due_date": ("date", ["due date", "payment due", "due by", "pay by"]),
             "seller": ("text", ["from", "seller", "vendor", "supplier", "sold by", "issued by"]),
             "buyer": ("text", ["bill to", "billed to", "customer", "client", "sold to", "invoice to", "buyer"]),
             "subtotal": ("money", ["subtotal", "sub total", "net amount", "total before tax", "total excl tax"]),
             "tax": ("money", ["tax", "vat", "gst", "sales tax", "tax amount"]),
             "total": ("money", ["total due", "amount due", "balance due", "grand total", "total amount", "total",
-                                "invoice total", "amount payable", "total payable"]),
+                                "invoice total", "amount payable", "total payable", "total for this invoice",
+                                "gesamtbetrag", "rechnungsbetrag", "endbetrag", "montant total", "total ttc",
+                                "importe total", "totale"]),
         },
     },
     "receipt": {
@@ -53,7 +59,8 @@ PROFILES: dict[str, dict] = {
             "merchant": ("text", []),
             "receipt_number": ("id", ["receipt no", "receipt number", "receipt #", "bill no", "invoice no", "doc no",
                                       "transaction no", "trans no", "order no", "check no"]),
-            "date": ("date", ["date", "date time", "transaction date"]),
+            "date": ("date", ["date", "date time", "transaction date", "bill date", "trans date", "receipt date",
+                              "sales date", "doc date", "invoice date", "tarikh"]),
             "subtotal": ("money", ["subtotal", "sub total", "sub-total"]),
             "tax": ("money", ["tax", "gst", "vat", "service tax", "service charge"]),
             "total": ("money", ["grand total", "total amount", "total rm", "total", "net total", "amount due",
@@ -277,13 +284,20 @@ NAMES: dict[str, list[str]] = {
     "budget": ["budget", "budget request", "proposed budget"],
     "press release": ["press release", "news release", "for immediate release"],
     "presentation": ["presentation"],
+    "fax cover sheet": ["facsimile", "fax cover", "cover sheet", "fax transmittal", "facsimile transmission",
+                        "telecopy", "pages including"],
     "form": ["application form", "registration form", "request form", "form"],
 }
+PROFILES["fax cover sheet"] = {"words": ["fax", "pages", "fax no", "fax number", "number of pages", "urgent"],
+                               "facts": {"to": ("text", ["to"]), "from": ("text", ["from"]), "date": ("date", ["date"]),
+                                         "fax_number": ("text", ["fax", "fax no", "fax number"])}}
 PROFILES["press release"] = {"words": ["contact", "announced", "said", "today", "media", "press"], "facts": {
     "date": ("date", ["date", "for immediate release"]), "contact": ("text", ["contact", "media contact"])}}
 # the header lines memos and e-mails share
 _HEADER_WORDS = ["to :", "from :", "subject :", "date :", "re :", "cc :"]
-_EMAIL_FROM = re.compile(r"(?im)^\W*(?:from|to|sent|cc)\s*:.{0,80}?[\w.+-]+@[\w-]+\.[\w.]+")
+_EMAIL_FROM = re.compile(r"(?im)^\W*(?:from|to|sent|cc)\s*:.{0,80}?[\w.+-]+@[\w-]+\.[\w.]+"
+                         r"|^\W*from\s*:.{0,60}?\b\d{1,2}:\d{2}(?::\d{2})?\s*(?:am|pm)\b")
+_SALUTATION = re.compile(r"(?im)^\W{0,3}dear\s+(?:mr|mrs|ms|dr|sir|madam|[A-Z][a-z]+)")
 
 
 def _norm_text(text: str) -> str:
@@ -302,6 +316,7 @@ def classify(head: str, body: str, n_fields: int = 0, n_words: int = 0) -> tuple
     heads, words = _norm_text(head), _norm_text(body)
     header_hits = [w for w in _HEADER_WORDS if _norm_text(w) in words]
     email_addr = bool(_EMAIL_FROM.search(body or ""))
+    salutation = bool(_SALUTATION.search(body or ""))
     best, best_score, basis = None, 0.0, []
     scores: dict[str, float] = {}
     for dtype, prof in PROFILES.items():
@@ -329,7 +344,10 @@ def classify(head: str, body: str, n_fields: int = 0, n_words: int = 0) -> tuple
             found += header_hits
         if dtype == "email" and email_addr:
             score += 4
-            found.append("an e-mail address in the header")
+            found.append("an e-mail header line")
+        if dtype == "letter" and salutation:
+            score += 3
+            found.append("a 'Dear ...' salutation")
         if dtype == "form":
             score = min(score, 3) + (2 if n_fields >= 6 else 0)
         if dtype in ("advertisement", "news article"):
@@ -387,7 +405,9 @@ def _label_match(label: str, aliases: list[str]) -> tuple[int, str] | None:
 
 
 _CUR = r"(?:RM|Rp\.?|Rs\.?|USD|EUR|GBP|IDR|INR|MYR|SGD|AUD|CAD|[$€£¥₹])"
-_AMOUNT_TOKEN = re.compile(rf"^\(?{_CUR}?\s*(-?)(\d{{1,3}}(?:[,.]\d{{3}})+|\d+)([.,]\d{{2}})?{_CUR}?\)?[:;,.]?$")
+# a plain number without separators is an amount up to six digits (longer runs, or
+# runs with leading zeros, are numbers of a register or an account)
+_AMOUNT_TOKEN = re.compile(rf"^\(?{_CUR}?\s*(-?)(\d{{1,3}}(?:[,.]\d{{3}})+|0|[1-9]\d{{0,5}})([.,]\d{{2}})?{_CUR}?\)?[:;,.]?$")
 # words that turn 'total ...' into another line (a tax, a count, a payment)
 _NOT_TOTAL = {"gst", "tax", "vat", "qty", "quantity", "items", "item", "discount", "disc", "saving", "savings", "change",
               "cash", "excl", "excluding", "points", "tendered", "paid", "weight", "units", "pcs", "unit", "before"}
@@ -399,6 +419,15 @@ def read_amount(text: str, decimals_expected: bool = False) -> tuple[str, str, l
     The amount is the rightmost one; other amounts on the same line, a value with
     no decimals where the document prints cents, and a decimal point OCR dropped
     ('88 17') all send it for review."""
+    spaced = re.sub(r"(\d)([.,])\s(\d{2})(?!\d)", r"\1\2\3", text or "")
+    if spaced != (text or ""):  # OCR set a space after the decimal point: '68. 87'
+        r = read_amount(spaced, decimals_expected)
+        if r:
+            return r[0], "needs_review", r[2] + [f"read '{(text or '').strip()[:20]}' with a space after the decimal point"]
+    whole = re.fullmatch(rf"\(?({_CUR})?\s*(\d{{1,3}}(?:\s\d{{3}})+(?:[.,]\d{{2}})?)\s*({_CUR})?\)?", (text or "").strip())
+    if whole:  # '1 036,58': thousands set apart by spaces
+        num = whole.group(2).replace(" ", "")
+        return (whole.group(1) or "") + num, "needs_review", [f"read '{text.strip()}' as one amount with spaces between thousands"]
     toks = [t for t in re.split(r"\s+", (text or "").strip()) if t]
     # a currency code standing apart from its number ('RM 62.80')
     merged = []
@@ -431,14 +460,15 @@ def read_amount(text: str, decimals_expected: bool = False) -> tuple[str, str, l
     if wordy:
         status = "needs_review"
         notes.append(f"words next to the amount: {' '.join(wordy)[:30]}")
-    if decimals_expected and not m.group(3) and not re.search(r"[,.]\d{3}", m.group(2)):
+    if decimals_expected and not m.group(3):
         status = "needs_review"
         notes.append("no cents, while the document's other amounts have them")
     return tok, status, notes
 
 
 def read_date(text: str) -> tuple[str, str, list[str]] | None:
-    m = re.search(DATE_RX, text or "")
+    text = re.sub(r"\s+,", ",", text or "")  # 'August 3 , 2014'
+    m = re.search(DATE_RX, text)
     if not m:
         return None
     v = m.group(0).strip()
@@ -509,6 +539,8 @@ def _first_line_org(doc: dict) -> tuple[str, dict, str, list[str]] | None:
             generic = re.search(r"\b(invoice|receipt|statement|bill|tax|official|copy|page|sample|synthetic|ocr|report|"
                                 r"welcome|thank|cash|order|table|date|time)\b", low)
             if _ORG.search(t) and not re.match(r"^(company|co|gst|reg|registration)\b", low):
+                if first is not None and first[0] != t:
+                    return t, b, "needs_review", [f"a company line, but '{first[0]}' is printed above it"]
                 return t, b, "valid", []
             if first is None and not generic:
                 first = (t, b)
@@ -517,11 +549,17 @@ def _first_line_org(doc: dict) -> tuple[str, dict, str, list[str]] | None:
     return None
 
 
-def _label_match_fact(label: str, aliases: list[str], money_total: bool) -> tuple[int, str] | None:
+_ID_WORDS = {"no", "number", "reg", "registration", "id", "nr", "num", "code", "ref"}
+_INCLUSIVE = {"incl", "inclusive", "including", "inc", "with"}
+
+
+def _label_match_fact(label: str, aliases: list[str], money_total: bool, money: bool = False) -> tuple[int, str] | None:
     m = _label_match(label, aliases)
-    if m and money_total and m[0] == 1:
+    if m and m[0] == 1:
         extra = set(_canon(label)[len(_canon(m[1])):])
-        if extra & _NOT_TOTAL:
+        if money and extra & _ID_WORDS:
+            return None  # 'GST No.' is a registration number, not an amount of tax
+        if money_total and extra & _NOT_TOTAL and not extra & _INCLUSIVE:
             return None
     return m
 
@@ -585,18 +623,26 @@ def key_facts(doc: dict) -> dict:
             return read_date(text)
         v = str(text or "").strip()
         if kind == "id":
-            m = re.search(KINDS["id"], v)
-            return (m.group(0).strip(".#"), "valid", []) if m and re.search(r"\d", m.group(0)) and len(v) <= 40 else None
+            # the first whole token that carries a digit and is not a date
+            for tok in re.split(r"\s+", v)[:4]:
+                tok = tok.strip(".,:;#()")
+                if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9/\-#._]{2,}", tok) and re.search(r"\d", tok) \
+                        and not (parse_date(tok, "mdy") or parse_date(tok, "dmy")) and len(tok) <= 40:
+                    return tok, "valid", []
+            return None
         return (v, "valid", []) if v and len(v) <= 200 else None
 
     out: dict = {}
     for fact, (kind, aliases) in prof["facts"].items():
         totalish = kind == "money" and fact in ("total", "amount_due", "net_pay", "gross_pay", "subtotal")
+        others = [al for f2, (_, als) in prof["facts"].items() if f2 != fact for al in als]
         cands = []
         for e, k, a in attrs:
-            m = _label_match_fact(a["field_label"], aliases, totalish)
+            m = _label_match_fact(a["field_label"], aliases, totalish, kind == "money")
             if not m:
                 continue
+            if m[0] == 1 and (_label_match(a["field_label"], others) or (0,))[0] == 2:
+                continue  # 'Invoice Date' names the date, not the invoice number
             r = read(kind, a.get("raw") or a["value"])
             if r:
                 cands.append((m[0], aliases.index(m[1]), e, k, a, r))
@@ -628,11 +674,13 @@ def key_facts(doc: dict) -> dict:
             for rank, alias in enumerate(aliases):
                 for b in lines:
                     for rest, mm in _after_label(b["text"], alias, fact):
-                        words = re.findall(r"[A-Za-z]{2,}", rest.split("\n")[0])
-                        if totalish and ({w.lower() for w in words} & _NOT_TOTAL):
+                        words = {w.lower() for w in re.findall(r"[A-Za-z]{2,}", rest.split("\n")[0])}
+                        if totalish and words & _NOT_TOTAL and not words & _INCLUSIVE:
+                            continue
+                        if kind == "money" and words & _ID_WORDS and not re.search(r"\d[.,]\d{2}\b", rest):
                             continue
                         lead = re.split(r"\d", rest, maxsplit=1)[0]
-                        if len(re.findall(r"[A-Za-z]{3,}", lead)) > 2:
+                        if len(re.findall(r"[A-Za-z]{3,}", lead)) > 3:
                             continue  # the label is part of a sentence
                         r = read(kind, rest.strip(" :.#\t"))
                         if r:
@@ -648,6 +696,23 @@ def key_facts(doc: dict) -> dict:
                     notes = notes + [f"the line '{h[3]}' appears with {len(vals)} different values"]
                 out[fact] = {"value": value, "label": h[3], "page": h[2].get("page"), "bbox": h[2].get("bbox"),
                              "method": "line starting with the label", "status": status, "notes": notes}
+                continue
+        if kind == "date" and fact == "date":
+            seen = []
+            sources = [(b["text"], b) for b in lines] + [(str(a.get("raw") or a["value"]), a) for _, _, a in attrs]
+            for txt, b in sources:
+                for mm in re.finditer(DATE_RX, txt):
+                    r = read_date(mm.group(0))
+                    if r and r[1] == "valid":
+                        seen.append((r[0], b))
+            if seen:
+                days = {parse_date(v, "dmy") or v for v, _ in seen}
+                v, b = seen[0]
+                one = len(days) == 1
+                out[fact] = {"value": v, "label": "the date printed on the document", "page": b.get("page"),
+                             "bbox": b.get("bbox"), "method": "only date printed" if one else "first date printed",
+                             "status": "valid" if one else "needs_review",
+                             "notes": [] if one else [f"{len(days)} different dates are printed; the first is taken"]}
                 continue
         if fact in ("merchant", "seller", "name") or (fact == "sender" and dtype == "letter"):
             org = _first_line_org(doc)
@@ -681,9 +746,16 @@ def _total_row(doc: dict, aliases: list[str], read) -> dict | None:
             _, k, a = min(named, key=lambda x: x[0])
             r = read("money", a.get("raw") or a["value"])
             if r:
+                status, notes = r[1], list(r[2])
+                v = amount_value(r[0])
+                rest = [amount_value(read("money", b.get("raw") or b["value"])[0]) for k2, b in cells
+                        if k2 != k and "%" not in str(b.get("value")) and read("money", b.get("raw") or b["value"])]
+                if v is not None and any(x is not None and x > v + 0.011 for x in rest):
+                    status = "needs_review"
+                    notes.append("smaller than another amount in its own row")
                 return {"value": r[0], "raw": a.get("raw") or a.get("value"), "label": f"{e['label']} / {a.get('field_label')}",
                         "entity": e["id"], "attribute": k, "page": a.get("page"), "bbox": a.get("bbox"),
-                        "method": "table row", "status": r[1], "notes": r[2]}
+                        "method": "table row", "status": status, "notes": notes}
         money = [(k, a, read("money", a.get("raw") or a["value"])) for k, a in cells]
         money = [m for m in money if m[2]]
         if money:
@@ -704,7 +776,23 @@ def _check_sums(out: dict) -> None:
         out[f]["status"] = "needs_review"
         out[f].setdefault("notes", []).append(note)
 
+    def day(f):
+        v = str(out[f]["value"]) if f in out else ""
+        return v if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v) else (parse_date(v, "dmy") or parse_date(v, "mdy"))
+
+    issued, due = day("invoice_date"), day("due_date")
+    if issued and due and due < issued:
+        flag("due_date", f"due before the invoice date {out['invoice_date']['value']}")
+    import datetime as _dt
+
+    today = _dt.date.today().isoformat()
+    for f in ("date", "invoice_date", "pay_date", "collected", "admission_date", "discharge_date", "order_date"):
+        d = day(f)
+        if d and (d > today or d < "1900-01-01") and out[f].get("status") == "valid":
+            flag(f, f"the date {out[f]['value']} lies in the future" if d > today else "the year is implausible")
     total, sub, tax, cash, change = num("total"), num("subtotal"), num("tax"), num("cash"), num("change")
+    if total is not None and tax is not None and tax > 0 and total <= tax + 0.001:
+        flag("total", f"not more than the tax {out['tax']['value']}")
     if total is not None and cash is not None and change is not None and cash >= change:
         if abs(cash - change - total) > 0.011 and abs(cash - total) > 0.011:
             flag("total", f"cash {out['cash']['value']} - change {out['change']['value']} does not give the total")
