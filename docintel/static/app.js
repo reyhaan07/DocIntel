@@ -672,9 +672,15 @@ function renderViewer(scrollTo = false) {
 
 /* ------------------------------------------------------------------ upload */
 async function uploadFiles(fileList) {
-  const files = [...fileList].filter((f) => /\.(pdf|png|jpe?g|tiff?)$/i.test(f.name) || f.type === "application/pdf" || f.type.startsWith("image/"));
-  if (!files.length) { toast("Only PDF and image files (PNG, JPG, TIFF) can be processed.", true); return; }
+  // the file types the page accepts are listed once, on the file input
+  const exts = $("#fileInput").accept.split(",").map((x) => x.trim().toLowerCase());
+  const files = [...fileList].filter((f) => exts.some((x) => f.name.toLowerCase().endsWith(x)) || f.type.startsWith("image/"));
+  if (!files.length) {
+    toast("Not a supported file. PDF, images and photos, Word, Excel, PowerPoint, OpenDocument, HTML, e-mail, text, Markdown, CSV, JSON and RTF files can be processed.", true);
+    return;
+  }
   const dz = $("#dropzone");
+  const idle = dz.innerHTML;
   let last = null;
   for (const f of files) {
     dz.classList.add("busy");
@@ -694,7 +700,7 @@ async function uploadFiles(fileList) {
     }
   }
   dz.classList.remove("busy");
-  dz.innerHTML = `<strong>Drop PDFs or scans here</strong><span>or click to choose · PDF, PNG, JPG, TIFF · each file is processed on its own</span>`;
+  dz.innerHTML = idle;
   if (last) { S.tab = "entities"; await loadDocs(last); }
 }
 

@@ -25,6 +25,12 @@ invented.
 
 `python samples/demo/make_demo.py` rebuilds them (needs `pip install python-docx openpyxl`).
 
+**A ready-made recording.** `samples/demo/record_video.js` records the whole demo by itself, like
+a screen recording: a mouse pointer moves to each button, uploads the ten documents one by
+one and opens what was read. Start the app (`python -m docintel serve --data demo_data
+--no-seed`), then run `node samples/demo/record_video.js out` (Node.js with Playwright). It
+writes a 1920 x 1080 WebM and `scenes.json` with the time of each scene, for captions.
+
 ---
 
 ## 1. Before you record (once)
