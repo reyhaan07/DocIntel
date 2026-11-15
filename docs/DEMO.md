@@ -8,6 +8,23 @@ it came from, and sends anything it is unsure of to review instead of guessing.
 Every file used below is in the repository. The people, companies and numbers in them are
 invented.
 
+## The ten demo documents (`samples/demo/`)
+
+| file | what it is | what docintel reads |
+|---|---|---|
+| `01_invoice.pdf` | invoice, text PDF | invoice no 51840277, date, seller and client blocks, items table, total $224,95 (flagged: three amounts on the total row) |
+| `02_receipt_photo.jpg` | cafe receipt, phone photo, tilted | merchant (flagged), bill no, date, subtotal 94,000 + tax 9,400 = total 103,400, cash, change |
+| `03_bank_statement.pdf` | bank statement, text PDF | holder, account 4471 0092 5813, period, opening $3,240.18, closing $4,105.62, transactions |
+| `04_payslip.docx` | payslip, Word | employee, ID NL-20417, March 2026, pay date, gross $4,665.00, net $3,648.50 |
+| `05_utility_bill_scan.png` | electricity bill, scanned image | account 88-301-4472, address, period, meter, 612 kWh, $128.47 due 2026-03-20 |
+| `06_discharge_summary.pdf` | hospital discharge summary | patient, admission and discharge dates, physician, diagnosis, medications table |
+| `07_prescription_scan.pdf` | prescription, scanned PDF | patient Mateo Silva, Dr. Priya Shah, date, the Rx lines (scan: some lines for review) |
+| `08_purchase_order.xlsx` | purchase order, Excel | PO-2026-0381, date, vendor, ship-to, items table, total $1,284.00 |
+| `09_payment_reminder.eml` | e-mail about an invoice | invoice SE-77120, invoice date, due date, total $128.47, sender |
+| `10_insurance_claim_form.pdf` | fillable PDF form | policy and claim numbers, insured, every filled box, the ticked 'No' |
+
+`python samples/demo/make_demo.py` rebuilds them (needs `pip install python-docx openpyxl`).
+
 ---
 
 ## 1. Before you record (once)
@@ -118,7 +135,7 @@ turned upright before reading.
 
 ### Scene 4 - An invoice: key facts (4:15-5:45)
 
-Drop **`samples/demo/invoice_seller_client.pdf`**.
+Drop **`samples/demo/01_invoice.pdf`**.
 
 **Expected:** type *invoice*. **Document** tab, top panel *Key facts*:
 
@@ -139,7 +156,7 @@ Below the key facts: the items table with every column, then the summary table.
 
 ### Scene 5 - A phone photo of a receipt (5:45-7:00)
 
-Drop **`samples/demo/receipt_photo.jpg`** (a receipt on a table, tilted, unevenly lit).
+Drop **`samples/demo/02_receipt_photo.jpg`** (a receipt on a table, tilted, unevenly lit).
 
 **Expected:** type *receipt*, key facts:
 

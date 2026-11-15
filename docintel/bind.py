@@ -959,6 +959,8 @@ class Binder:
                 ent = self._row_entity(spec, espec, region, table, row, rowno)
                 if ent:
                     made.append(ent)
+            if not self.scan:
+                self._unread_cells(spec, region, table, made)
         if not made and not self.scan and spec["key"] not in self.none_answers:
             made = self._record_rows(spec, regions)
         if not made and not self.scan and spec["key"] not in self.none_answers and spec.get("inline_list", True):
@@ -974,6 +976,39 @@ class Binder:
             elif espec["type"] == "Surgery":
                 self._derive_hospitals(made)
         return made
+
+    def _unread_cells(self, spec, region, table, made) -> None:
+        """On a scan, a row that leaves a column empty where the other rows fill it may have
+        lost words to OCR (a faint or short word in a cell).  The row is sent to review and
+        the empty cells are listed, instead of the record passing as complete."""
+        rows = [r for r in table.rows if any(t.source == "ocr" for c in r.cells.values() for t in c.all_tokens)]
+        if len(rows) < 2:
+            return
+        key_col = next(c for c in spec["columns"] if c.get("row_key"))
+        by_row = {e.extra.get("row_bbox") and tuple(e.extra["row_bbox"]): e for e in made}
+        for r in rows:
+            ent = by_row.get(tuple(bbox_of([t for ln in r.lines for t in ln.tokens])))
+            if ent is None or not r.cells.get(key_col["key"]) or not r.cells[key_col["key"]].text:
+                continue
+            empty = []
+            for cspec, _, _, htoks in table.columns:
+                k = cspec["key"]
+                if k == key_col["key"] or cspec.get("unknown") or r.cells[k].text:
+                    continue
+                filled = sum(1 for o in rows if o is not r and o.cells[k].text)
+                if filled and filled >= 0.5 * (len(rows) - 1):
+                    empty.append(cspec.get("label", k))
+            if not empty:
+                continue
+            labels = ", ".join(empty)
+            note = (f"on this scan the {labels} cell{'s' if len(empty) > 1 else ''} of the row "
+                    f"'{ent.label}' {'are' if len(empty) > 1 else 'is'} empty while the other rows fill "
+                    f"{'them' if len(empty) > 1 else 'it'} - OCR may have missed a faint or short word; confirm")
+            for a in ent.attributes.values():
+                if a.status == "valid":
+                    a.status = "needs_review"
+                a.notes.append(note)
+            self.add_missing("unread_cell", f"{spec['key']}[{ent.label}]", labels, note, ent.id, region)
 
     def _row_entity(self, spec, espec, region, table, row, rowno) -> Entity | None:
         cols = {cspec["key"]: (cspec, htoks) for cspec, _, _, htoks in table.columns}
@@ -1315,7 +1350,11 @@ class Binder:
                         ent.attributes[k] = self.make_attr(value, htoks, cell.all_tokens, "table", region, raw=cell.text)
                     self._family_conditions(ent, ent.attributes.get("conditions"), region,
                                             row.cells["conditions"].all_tokens if "conditions" in row.cells else [])
+                    ent.extra["row_bbox"] = bbox_of([t for ln in row.lines for t in ln.tokens])
                     members.append(ent)
+                if not self.scan:
+                    self._unread_cells({**spec, "columns": [{**c, "row_key": c["key"] == "relation"} for c in spec["columns"]]},
+                                       region, table, members)
             return members
         rows = [(region, r) for region in regions for r in self.kv_rows(region) if not r.header and r.label and r.value]
         row_lines = {id(ln) for _, r in rows for ln in r.lines}
@@ -1437,6 +1476,8 @@ class Binder:
         out = []
         q_table = Template.alias_table(spec["questions"])
         done = set()
+        partial = []  # Yes/No lines whose question matched none of the section's questions
+        order = []  # (page, top, question key or None) of every Yes/No line, in reading order
         for region in regions:
             for ln in self.lines(region):
                 parsed = self._yes_no_line(ln.tokens)
@@ -1449,6 +1490,9 @@ class Binder:
                     if m:
                         qspec = m[1]
                         break
+                order.append((region.page, ln.top, qspec["key"] if qspec else None))
+                if not qspec:
+                    partial.append((question, yes, no, region, ln))
                 if not qspec or qspec["key"] in done:
                     continue
                 done.add(qspec["key"])
@@ -1460,6 +1504,35 @@ class Binder:
                         self.slot(f"{spec['key']}.{qspec['key']}.no", [b], region, qtext)
                     continue
                 out.append(self._consent(qspec["key"], qspec["label"], question, yes, no, region))
+        # OCR may lose words of a question ('May we contact [you by email?]'): when what was
+        # read is the start of exactly one of the section's questions not found elsewhere,
+        # the answer is that question's - matched by elimination, and sent to review
+        keys = [q["key"] for q in spec["questions"]]
+        for question, yes, no, region, ln in partial if not self.scan else []:
+            if not any(t.source == "ocr" for t in question):
+                continue
+            read = label_text(" ".join(t.text for t in question))
+            left = [q for q in spec["questions"] if q["key"] not in done]
+            if not left or len(canon_tokens(read)) < 2:
+                continue
+            # the form asks its questions in the template's order: the unread one comes after
+            # the questions read above it and before those read below it
+            here = (region.page, ln.top)
+            above = [keys.index(k) for p, t, k in order if k and (p, t) < here]
+            below = [keys.index(k) for p, t, k in order if k and (p, t) > here]
+            lo, hi = max(above, default=-1), min(below, default=len(keys))
+            fit = [q for q in left if lo < keys.index(q["key"]) < hi] or left
+            qspec = fit[0]
+            done.add(qspec["key"])
+            ent = self._consent(qspec["key"], qspec["label"], question, yes, no, region)
+            others = [q["label"] for q in fit[1:]]
+            note = (f"the question was read only as '{read}' (OCR lost words of it); taken to be the "
+                    f"'{qspec['label']}' question, the next one of this section not found elsewhere"
+                    + (f" (it could also be: {', '.join(others)})" if others else "") + " - confirm")
+            for a in ent.attributes.values():
+                a.status = "needs_review"
+                a.notes.append(note)
+            out.append(ent)
         if not self.scan:
             for qspec, region, ltoks, words, decision in self._text_answers(regions, q_table):
                 if qspec["key"] in done:

@@ -663,6 +663,10 @@ def key_facts(doc: dict, printed_lines: list[dict] | None = None) -> dict:
             return read_date(text)
         v = str(text or "").strip()
         if kind == "id":
+            # digits printed in groups ('4471 0092 5813', an account or card number) are one number
+            groups = re.match(r"^[#:\s]*((?:\d{2,6}[ \-]){1,5}\d{2,6})(?![\d/.,])", v)
+            if groups and not (parse_date(groups.group(1), "mdy") or parse_date(groups.group(1), "dmy")):
+                return groups.group(1), "valid", []
             # the first whole token that carries a digit and is not a date
             for tok in re.split(r"\s+", v)[:4]:
                 tok = tok.strip(".,:;#()")

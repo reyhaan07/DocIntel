@@ -1,0 +1,22 @@
+From: Summit Energy Accounts <accounts@summitenergy.example>
+To: Amara Okafor <amara.okafor@example.com>
+Date: Mon, 16 Mar 2026 09:12:00 +0000
+Subject: Payment reminder - Invoice SE-77120
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 7bit
+MIME-Version: 1.0
+
+Dear Amara Okafor,
+
+This is a friendly reminder that the invoice below is due soon.
+
+Invoice Number: SE-77120
+Invoice Date: 03/01/2026
+Account Number: 88-301-4472
+Amount Due: $128.47
+Due Date: 03/20/2026
+
+You can pay online at summitenergy.example or by calling 1-800-555-0144.
+
+Kind regards,
+Summit Energy Accounts Team

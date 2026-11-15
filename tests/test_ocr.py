@@ -3,7 +3,7 @@ import numpy as np
 import pytest
 from PIL import Image, ImageDraw
 
-from conftest import ent_by, rels
+from conftest import SAMPLES, ent_by, rels
 from docintel import ocr
 from docintel.normalize import fix_dosage
 from docintel.pipeline import process_pdf
@@ -121,7 +121,16 @@ def test_scanned_other_clinic_reads_like_the_original(scanned, processed):
 @needs_engine
 def test_scanned_boxed_form_reads_drawn_checkboxes(scanned, processed):
     doc, original = scanned["E"], processed["B"]
-    assert doc["summary"]["entities"] == original["summary"]["entities"]
+    # the scan reads the same records as the digital copy; OCR engines differ a little from
+    # version to version, so anything the scan adds must at least be sent to review
+    from docintel.evaluate import _similar
+
+    digital = [(e["type"], e["label"]) for e in original["entities"].values()]
+    for e in doc["entities"].values():
+        if e["type"] == "Section" or any(t == e["type"] and _similar(lab, e["label"]) >= 0.75 for t, lab in digital):
+            continue
+        assert any(a["status"] != "valid" for a in e["attributes"].values()), e
+    assert abs(doc["summary"]["entities"] - original["summary"]["entities"]) <= 2
     assert doc["summary"]["validation_errors"] == 0
     assert doc["entities"]["PAT_001"]["label"] == "Erik Lindqvist"
     cons = {e["consent_key"]: e["attributes"]["decision"]["value"] for e in doc["entities"].values() if e["type"] == "Consent"}
@@ -171,3 +180,40 @@ def test_light_text_on_a_dark_header_band(tmp_path):
     make_scanned(src, scan, dpi=150, seed=3, angles=[0.0])
     words = {t.text for t in ocr.ocr_page(scan, 1, 612, 792).tokens}
     assert {"Date", "Description", "Debit", "Credit"} <= words
+
+
+@needs_engine
+def test_words_lost_by_another_ocr_version_are_flagged_not_silent(monkeypatch):
+    """Tesseract 5.4.0 (Windows) drops 'Living' and '63' from the Father row and 'you by
+    email?' from the e-mail consent on scan E's second page.  The record must not pass as
+    complete: the row goes to review with its empty cells listed, and the consent read as
+    'May we contact' is matched by elimination and flagged - no silent error."""
+    import json
+
+    from docintel.evaluate import compare
+
+    real = ocr.ocr_page
+
+    def lossy(pdf_path, page_number, *a, **k):
+        page = real(pdf_path, page_number, *a, **k)
+        if page_number == 2:
+            row = lambda a: [t for t in page.tokens if abs(t.cy - a.cy) < 5]
+            drop = set()
+            for t in page.tokens:
+                if t.text == "Father":
+                    drop |= {id(u) for u in row(t) if u.text in ("Living", "63")}
+                if "email" in t.text.lower() and any(u.text == "contact" for u in row(t)):
+                    drop |= {id(u) for u in row(t) if u.text in ("you", "by") or "email" in u.text.lower()}
+            assert len(drop) == 5
+            page.tokens = [t for t in page.tokens if id(t) not in drop]
+        return page
+
+    monkeypatch.setattr(ocr, "ocr_page", lossy)
+    doc = process_pdf(SAMPLES / "intake_E_scanned_lindqvist.pdf")
+    truth = json.loads((SAMPLES.parent / "ground_truth" / "intake_E_scanned_lindqvist.json").read_text())
+    rep = compare(doc, truth)
+    assert rep["silent_errors"] == 0, rep["details"]
+    email = next(e for e in doc["entities"].values() if e.get("consent_key") == "email")
+    assert email["attributes"]["decision"]["value"] == "yes" and email["attributes"]["decision"]["status"] == "needs_review"
+    father = next(e for e in doc["entities"].values() if e["type"] == "FamilyMember" and e["label"] == "Father")
+    assert any(m["kind"] == "unread_cell" and m["entity"] == father["id"] for m in doc["missing"])
