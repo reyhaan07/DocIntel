@@ -8,3 +8,8 @@ __pycache__/
 /dist/
 .venv/
 /bench_out/
+
+# local runs: the demo's app store and processed output
+demo_data/
+out_demo/
+output/
