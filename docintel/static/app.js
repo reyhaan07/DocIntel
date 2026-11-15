@@ -233,7 +233,8 @@ function keyFacts() {
   const names = Object.keys(kf);
   if (!names.length) return "";
   const m = S.doc.document;
-  let h = `<div class="grouphead">Key facts · ${esc(m.document_type || "document")}</div>`;
+  const carries = m.carries ? ` carrying ${esc(m.carries)}` : "";
+  let h = `<div class="grouphead" title="${esc(m.document_type_basis || "")}">Key facts · ${esc(m.document_type || "document")}${carries}</div>`;
   for (const k of names) {
     const f = kf[k];
     const sel = f.entity && f.attribute ? `data-sel="attr:${f.entity}:${f.attribute}"` : "";

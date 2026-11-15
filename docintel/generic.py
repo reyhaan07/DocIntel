@@ -1228,6 +1228,10 @@ def guess_document_type(binder) -> tuple[str | None, str, str | None]:
 
 
 def _title_lines(lines, page_height: float) -> list[str]:
+    return [" ".join(t.text for t in ln.tokens if t.kind == "word") for ln in title_lines(lines, page_height)]
+
+
+def title_lines(lines, page_height: float) -> list:
     """The title of the first page: lines in its top third set larger than the text
     around them, or in capitals, or bold."""
     if not lines:
@@ -1246,5 +1250,5 @@ def _title_lines(lines, page_height: float) -> list[str]:
         caps = letters.isupper() and len(letters) >= 4
         bold = all(t.bold for t in words)
         if big or caps or bold:
-            out.append(" ".join(t.text for t in words))
+            out.append(ln)
     return out

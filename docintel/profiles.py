@@ -596,6 +596,9 @@ def key_facts(doc: dict) -> dict:
     'valid' when read cleanly, 'needs_review' when anything about it is uncertain."""
     dtype = doc["document"].get("document_type")
     prof = PROFILES.get(dtype or "")
+    if prof is None:  # nothing names the type: its date and total are still worth stating
+        prof = {"facts": {"date": ("date", ["date", "dated"]),
+                          "total": ("money", ["grand total", "total amount", "total", "amount due", "total due"])}}
     carried = doc["document"].get("carries")
     if carried in PROFILES:
         facts = dict(PROFILES[carried]["facts"])

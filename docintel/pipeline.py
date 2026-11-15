@@ -40,8 +40,20 @@ def _extraction_method(pages) -> str:
 
 def _title(binder) -> str | None:
     """The document's own title: the first heading on the first page."""
+    from .generic import title_lines
+
     first = sorted((r for r in binder.regions if r.page == 1 and r.heading and not r.continued), key=lambda r: r.top)
+    page = binder.pages_by_no.get(1)
+    tops = [ln for ln in title_lines(binder.lines_by_page.get(1, []), page.height if page else 792)
+            if (not first or ln.bottom <= first[0].top + 1) and (ln.bottom - ln.top) >= 1.25 * _typical_height(binder)]
+    if tops:  # a larger title line above the first section heading ("Invoice no: 97159829")
+        return " ".join(t.text for t in tops[0].tokens if t.kind == "word")[:120]
     return first[0].name if first else None
+
+
+def _typical_height(binder) -> float:
+    hs = sorted(ln.bottom - ln.top for ln in binder.lines_by_page.get(1, []))
+    return hs[len(hs) // 2] if hs else 10.0
 
 
 def _unskew(doc: dict, pages) -> None:
