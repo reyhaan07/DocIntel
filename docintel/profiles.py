@@ -595,6 +595,8 @@ def _after_label(txt: str, alias: str, fact: str):
         if fact in ("total", "amount_due", "net_pay", "gross_pay") and \
                 re.search(r"(sub|qty|tax|items?|discount|savings|excl|gst|vat)[\W_]*$", before):
             continue
+        if fact == "tax" and re.search(r"(incl|inclusive|including|excl|exclusive|excluding)\W*(of\W*)?$", before):
+            continue  # 'Total (Inclusive of GST) 22.91' is a total, not the tax
         line_start = txt.rfind("\n", 0, mm.start()) + 1
         if txt[line_start:mm.start()].strip(" :*-.#\t") and fact in ("total", "date", "invoice_date"):
             # the label must start its line ('Payment due date' is not 'date')
@@ -853,23 +855,6 @@ def _check_sums(out: dict) -> None:
         if d and (d > today or d < "1900-01-01") and out[f].get("status") == "valid":
             flag(f, f"the date {out[f]['value']} lies in the future" if d > today else "the year is implausible")
     total, sub, tax, cash, change = num("total"), num("subtotal"), num("tax"), num("cash"), num("change")
-    if total is not None and tax is not None and tax > 0 and total <= tax + 0.001:
-        flag("total", f"not more than the tax {out['tax']['value']}")
-    if total is not None and cash is not None and change is not None and cash >= change:
-        if abs(cash - change - total) > 0.011 and abs(cash - total) > 0.011:
-            flag("total", f"cash {out['cash']['value']} - change {out['change']['value']} does not give the total")
-    if total is None and cash is not None and change is not None and cash > change >= 0 and "cash" in out:
-        # the total line could not be read, but the payment can: cash - change is the total;
-        # it stands as read only when the subtotal printed on the receipt says the same
-        derived = cash - change
-        agrees = sub is not None and abs(sub - derived) <= 0.011
-        out["total"] = {"value": _like(out["cash"]["value"], derived), "label": "cash - change",
-                        "page": out["cash"].get("page"), "bbox": out["cash"].get("bbox"),
-                        "method": "worked out from the payment",
-                        "status": "valid" if agrees and out["cash"]["status"] == "valid" and
-                        out["change"]["status"] == "valid" else "needs_review",
-                        "notes": [f"cash {out['cash']['value']} - change {out['change']['value']}"
-                                  + ("; equals the subtotal" if agrees else "; the total line itself was not read")]}
     # the receipt's own arithmetic confirms a reading the reader was unsure of: when the
     # printed numbers add up exactly, each of them was read right
     def confirm(names, note):
@@ -879,11 +864,28 @@ def _check_sums(out: dict) -> None:
                     out[n]["status"] = "valid"
                     out[n].setdefault("notes", []).append(f"confirmed: {note}")
 
-    if total is not None and sub is not None and tax is not None and tax > 0 and abs(sub + tax - total) <= 0.011:
+    if total is not None and sub is not None and tax is not None and tax > 0 and abs(sub + tax - total) < 0.001:
         confirm(("subtotal", "tax", "total"), "subtotal + tax = total")
     if total is not None and cash is not None and change is not None and cash > change and \
-            abs(cash - change - total) <= 0.011 and out["total"].get("method") != "worked out from the payment":
+            abs(cash - change - total) < 0.001 and out["total"].get("method") != "worked out from the payment":
         confirm(("cash", "change", "total"), "cash - change = total")
+    if total is not None and tax is not None and tax > 0 and total <= tax + 0.001:
+        flag("total", f"not more than the tax {out['tax']['value']}")
+    if total is not None and cash is not None and change is not None and cash >= change:
+        if abs(cash - change - total) > 0.011 and abs(cash - total) > 0.011:
+            flag("total", f"cash {out['cash']['value']} - change {out['change']['value']} does not give the total")
+    if total is None and cash is not None and change is not None and cash > change >= 0 and "cash" in out:
+        # the total line could not be read, but the payment can: cash - change is the total;
+        # it stands as read only when the subtotal printed on the receipt says the same
+        derived = cash - change
+        agrees = sub is not None and abs(sub - derived) < 0.001
+        out["total"] = {"value": _like(out["cash"]["value"], derived), "label": "cash - change",
+                        "page": out["cash"].get("page"), "bbox": out["cash"].get("bbox"),
+                        "method": "worked out from the payment",
+                        "status": "valid" if agrees and out["cash"]["status"] == "valid" and
+                        out["change"]["status"] == "valid" else "needs_review",
+                        "notes": [f"cash {out['cash']['value']} - change {out['change']['value']}"
+                                  + ("; equals the subtotal" if agrees else "; the total line itself was not read")]}
     if total is not None and sub is not None:
         ok = abs(sub - total) <= 0.011 or (tax is not None and abs(sub + tax - total) <= 0.051)
         if not ok and sub > total + 0.011:
