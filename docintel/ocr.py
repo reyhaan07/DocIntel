@@ -192,6 +192,28 @@ def _grid(arr, cell_px: float, thresh: int = 110):
     return ink.reshape(hh // step, step, ww // step, step).any(axis=(1, 3)), step
 
 
+def even_out_lighting(img, spread_limit: float = 30.0):
+    """Photos of paper are lit unevenly (shadows, a dark table around a receipt), which
+    defeats a single black/white threshold.  The paper's own brightness is estimated
+    from the brightest pixels around each spot (a coarse max filter, smoothed) and every
+    pixel is divided by it.  Pages that are evenly lit - scans, rendered PDFs - are
+    left exactly as they are.  Returns (image, applied)."""
+    import numpy as np
+    from PIL import Image, ImageFilter
+
+    w, h = img.size
+    if w < 64 or h < 64:
+        return img, False
+    small = img.resize((max(1, w // 8), max(1, h // 8)), Image.BOX)
+    bg_small = small.filter(ImageFilter.MaxFilter(7)).filter(ImageFilter.GaussianBlur(4))
+    b_small = np.asarray(bg_small).astype(np.float32)
+    if float(np.percentile(b_small, 95) - np.percentile(b_small, 5)) <= spread_limit:
+        return img, False
+    bg = np.asarray(bg_small.resize((w, h), Image.BILINEAR)).astype(np.float32)
+    a = np.asarray(img).astype(np.float32)
+    return Image.fromarray(np.clip(a / np.maximum(bg, 1.0) * 255.0, 0, 255).astype(np.uint8)), True
+
+
 def invert_dark_bands(arr):
     """Text printed on a shaded band (a table's header row, a title bar) is turned into
     black text on white, which is what the OCR engine reads.  A band is a filled
@@ -476,6 +498,7 @@ def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float
     angle = estimate_skew(img) if deskew else 0.0
     if angle:
         img = img.rotate(angle, resample=Image.BICUBIC, fillcolor=255)
+    img, evened = even_out_lighting(img)
     page_arr = np.asarray(img)
     page_arr, bands = invert_dark_bands(page_arr)
     clean, line_px = remove_lines(page_arr)
@@ -496,6 +519,8 @@ def ocr_page(pdf_path: str | Path, page_number: int, width: float, height: float
         notes.insert(0, f"page turned {rotation} degrees clockwise to read it upright")
     if line_px:
         notes.append("ruled lines and box borders removed before OCR")
+    if evened:
+        notes.append("uneven lighting (a photo) evened out before OCR")
     if bands:
         notes.append(f"{bands} shaded band(s) (table headers, title bars) cleaned to black on white before OCR")
     return OcrPage(tokens, marks, angle, width, height, notes, rotation)

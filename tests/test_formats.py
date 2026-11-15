@@ -20,7 +20,11 @@ def test_invoice_in_every_format(name, tmp_path):
     doc = _run(FIX / name, tmp_path)
     d = doc["document"]
     assert d["source_format"] == name.rsplit(".", 1)[1] and d["converted_from"]
-    assert d["document_type"] == "invoice"
+    if name == "invoice.eml":  # an e-mail that carries an invoice: both are reported
+        assert d["document_type"] == "email" and d["carries"] == "invoice"
+        assert doc["key_facts"]["total"]["value"] == "$307.80" and doc["key_facts"]["from"]["value"]
+    else:
+        assert d["document_type"] == "invoice"
     fields = {e["label"].lower(): e["attributes"]["value"]["value"] for e in doc["entities"].values() if e["type"] == "Field"}
     assert fields["invoice number"] == "INV-20931" and fields["total due"] == "$307.80"
     if name != "invoice.eml":

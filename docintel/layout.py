@@ -305,10 +305,12 @@ def _word_eq(a: str, b: str, fuzzy: bool) -> bool:
     return SequenceMatcher(None, a, b).ratio() >= 0.85
 
 
-def match_aliases(tokens: list[Token], start: int, table) -> tuple[int, dict] | None:
+def match_aliases(tokens: list[Token], start: int, table, skip: frozenset | set = frozenset()) -> tuple[int, dict] | None:
     """Longest alias (from ``Template.alias_table``) that matches tokens[start:].
 
     Words read by OCR are compared with a small tolerance ("Signatures" ~ "signature")."""
+    if start >= len(tokens) or tokens[start].kind != "word" or not canon_tokens(tokens[start].text):
+        return None  # a match starts on a word ('[%]' alone names nothing)
     words = []
     for t in tokens[start:start + 8]:
         if t.kind != "word":
@@ -324,10 +326,19 @@ def match_aliases(tokens: list[Token], start: int, table) -> tuple[int, dict] | 
             ends.append(i + 1)
     for alias, spec in table:
         n = len(alias)
+        if spec.get("key") in skip:
+            continue  # that column is named already: another one may carry the same name
         if n <= len(flat) and all(_word_eq(flat[k], alias[k], fuzzy[k]) for k in range(n)):
             consumed = ends[n - 1]
             # the alias must end exactly at a token boundary
             if n == len(flat) or ends[n] != ends[n - 1]:
+                # a unit or symbol printed right after the name belongs to it: "VAT [%]", "Amount ($)"
+                while start + consumed < len(tokens):
+                    u, prev = tokens[start + consumed], tokens[start + consumed - 1]
+                    if u.kind != "word" or not re.fullmatch(r"[\[(]?[%$€£¥₹#]+[\])]?", u.text) or u.x0 - prev.x1 > 8 \
+                            or abs(u.cy - prev.cy) > 0.6 * max(u.height, prev.height):
+                        break
+                    consumed += 1
                 return consumed, spec
     return None
 
@@ -741,7 +752,7 @@ def _header_hits(toks: list[Token], alias_table) -> list[tuple[dict, list[Token]
             taken |= {s["key"] for s in c[1]["combined"]}
             i += c[0]
             continue
-        m = match_aliases(toks, i, alias_table)
+        m = match_aliases(toks, i, alias_table, skip=taken)
         if m and not toks[i + m[0] - 1].text.endswith(":") and m[1]["key"] not in taken:
             hits.append((m[1], toks[i:i + m[0]]))
             taken.add(m[1]["key"])
@@ -865,6 +876,12 @@ def table_rows(lines: list[Line], cols, key: str, after: float = -1e9) -> list[T
         # a line made of a single "Label:" pair is not a table row
         if any(t.text.endswith(":") for c in cells.values() for t in c.tokens[:1]) and not has_key:
             break
+        order = [spec["key"] for spec, *_ in cols]
+        for a, b in zip(order, order[1:]):
+            ca, cb = cells[a].tokens, cells[b].tokens
+            if len(ca) >= 1 and cb and re.fullmatch(r"[$€£¥₹]|RM|Rp|USD|EUR|GBP", ca[-1].text) \
+                    and re.match(r"-?\d", cb[0].text) and 0 <= cb[0].x0 - ca[-1].x1 < 14:
+                cb.insert(0, ca.pop())  # "$ 88,92": the symbol was set left of the column
         if has_key:
             rows.append(TableRow(len(rows) + 1, cells, [ln2]))
         elif others and rows:

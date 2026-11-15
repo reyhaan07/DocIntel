@@ -118,7 +118,8 @@ def _parse_kv_line(tokens: list[Token], table) -> list[tuple[dict | None, list[T
                 floor = labels[-1][1] if labels else 0
                 while (start - 1 >= floor and i - start < 4 and tokens[start - 1].kind == "word"
                        and not tokens[start - 1].text.endswith((":", ".", ";", ","))
-                       and tokens[start].x0 - tokens[start - 1].x1 < 5):
+                       and tokens[start].x0 - tokens[start - 1].x1 < max(5.0, 0.7 * max(tokens[start].height,
+                                                                                         tokens[start - 1].height))):
                     start -= 1
                 if after_box(start):
                     i += 1

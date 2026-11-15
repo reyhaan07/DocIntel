@@ -91,11 +91,67 @@ def _reads_like_label(raw: str) -> bool:
     return named >= 1 and hits >= 0.5 * len(words)
 
 
+_ID_LABELS = {"ein", "ssn", "tin", "ptin", "caf", "npi", "dea", "mrn", "iban", "swift", "bic", "sku", "upc", "fein"}
+_CONTACT_LABELS = {"phone", "tel", "telephone", "fax", "email", "e-mail", "mobile", "cell"}
+
+
+def _holds_label(raw: str) -> bool:
+    """'CAF No. 42570526414', 'EIN 41-7564030', 'Phone (555) 010-2000': a value that
+    starts with, or carries, the label of another field printed next to it."""
+    t = (raw or "").strip()
+    if re.search(r"(?:^|\s)(?:No\.|No:|Number:|#:)\s*\S", t):
+        return True
+    first = re.split(r"[\s:.]+", t, maxsplit=1)
+    if len(first) == 2 and first[1] and first[0].lower() in _ID_LABELS | _CONTACT_LABELS:
+        return True
+    return False
+
+
+_LEADER = re.compile(r"^[.…·_\-]+$")
+_LINE_NO = re.compile(r"^\d{1,2}[a-z]?$")
+
+
+def _tidy_fields(st) -> None:
+    """Printed words that ended up in a value: words printed before a filled-in form
+    field, the leader dots and line number in front of a value ('. . . 7 [value]'),
+    and an instruction in brackets ('(Print) [name]') belong to the label."""
+    for f in st.fields:
+        vt, lt = list(f.value_tokens), list(f.label_tokens)
+        if not vt:
+            continue
+        changed = False
+        filled = [i for i, t in enumerate(vt) if t.source == "form_field"]
+        if filled and any(t.source != "form_field" and t.kind == "word" for t in vt):
+            lt += [t for t in vt[:filled[0]] if t.kind == "word"]
+            vt = vt[filled[0]: filled[-1] + 1]
+            changed = True
+        i = 0
+        while i < len(vt) and _LEADER.match(vt[i].text):
+            i += 1
+        if i and i < len(vt):
+            if i + 1 < len(vt) and _LINE_NO.match(vt[i].text):
+                i += 1
+            lt, vt, changed = lt + vt[:i], vt[i:], True
+        while len(vt) > 1 and _LEADER.match(vt[-1].text):
+            vt, changed = vt[:-1], True
+        if len(vt) > 1 and vt[0].text.startswith("("):
+            j = next((k for k, t in enumerate(vt[:4]) if t.text.endswith(")")), None)
+            if j is not None and j + 1 < len(vt) and not any(re.search(r"\d", t.text) for t in vt[:j + 1]):
+                lt, vt, changed = lt + vt[:j + 1], vt[j + 1:], True
+        if changed:
+            f.label_tokens, f.value_tokens = lt, vt
+            f.label = label_text(join_tokens(lt))
+            f.raw = clean(join_tokens(vt))
+
+
 def _generic_flags(binder, attr: Attribute, raw: str, vtype: str, continued: bool) -> None:
     ocr = attr.extraction_method.startswith("ocr")
     if ocr and attr.status == "valid" and _reads_like_label(raw):
         # on a scan, a 'value' made of field names is most likely the next label over an empty box
         attr.notes.append(f"the value '{raw}' reads like another label; the field may be empty - confirm")
+        attr.status = "needs_review"
+    if attr.status == "valid" and _holds_label(raw):
+        attr.notes.append(f"the value '{raw[:40]}' holds what reads as another field's label - confirm")
         attr.status = "needs_review"
     if vtype == "date" and binder.date_order not in ("mdy", "dmy") and is_ambiguous_date(raw):
         attr.notes.append(f"'{raw}' could be read day-first or month-first and nothing else on the document "
@@ -440,6 +496,65 @@ def _stacked_pairs(lines: list[Line], k: int):
     return pairs, n
 
 
+# labels that name a party, printed alone over its name and address
+PARTY_LABELS = {"bill to", "billed to", "ship to", "shipped to", "sold to", "seller", "buyer", "client", "customer",
+                "vendor", "supplier", "from", "to", "remit to", "deliver to", "delivery address", "invoice to",
+                "consignee", "shipper", "payer", "payee", "recipient", "issued to", "issued by", "bill from",
+                "billing address", "shipping address", "company", "patient", "employer", "employee"}
+
+
+def _labels_over_blocks(lines: list[Line], k: int):
+    """'Seller:' and 'Client:' (or 'Bill To:' and 'Ship To:') printed side by side, each over
+    a block of lines - a name and an address - set in its own column:
+
+        Seller:                   Client:
+        Bradley-Andrade           Castro PLC
+        9879 Elizabeth Common     Unit 9678 Box 9664
+
+    Line k holds only labels ending with ':' (one label alone must name a party); the
+    block is the run of tight lines under them, each piece starting under a label, up to
+    a blank gap or a line with a label of its own.  Returns ([(label tokens, [value line
+    tokens])], used line indexes) or None."""
+    ln = lines[k]
+    words = [t for t in ln.tokens if t.kind == "word"]
+    if not words or len(words) != len(ln.tokens) or len(words) > 10:
+        return None
+    segs = segments(ln, gap=20)
+    if len(segs) > 3 or any(len(sg) > 4 or not sg[-1].text.endswith(":") or
+                            any(t.text.endswith(":") for t in sg[:-1]) for sg in segs):
+        return None
+    if len(segs) == 1 and label_text(join_tokens(segs[0])).lower() not in PARTY_LABELS:
+        return None
+    h = sorted(t.height for t in words)[len(words) // 2]
+    starts = [sg[0].x0 for sg in segs]
+    cols: list[list[list[Token]]] = [[] for _ in segs]
+    taken: list[int] = []
+    prev = ln
+    j = k + 1
+    while j < len(lines) and len(taken) < 6:
+        b = lines[j]
+        if b.page != ln.page or any(t.kind != "word" for t in b.tokens):
+            break
+        if b.top - prev.bottom > (1.3 * h + 2 if not taken else 0.9 * h + 1):
+            break
+        bsegs = segments(b, gap=20)
+        if len(segs) == 1 and len(bsegs) > 1:
+            break  # a row of a table, not a line of an address
+        if not all(any(-8 <= sg[0].x0 - x <= 24 for x in starts) for sg in bsegs):
+            break
+        if any(t.text.endswith(":") for sg in bsegs for t in sg[:3]):
+            break  # a line with a label of its own ('Tax Id: ...')
+        for sg in bsegs:
+            i = max(i for i, x in enumerate(starts) if sg[0].x0 >= x - 8) if sg[0].x0 >= starts[0] - 8 else 0
+            cols[i].append(list(sg))
+        taken.append(j)
+        prev = b
+        j += 1
+    if not taken or not any(cols):
+        return None
+    return [(list(sg), cols[i]) for i, sg in enumerate(segs)], taken
+
+
 def extract_structure(binder) -> Structure:
     """Read the template-free structure of every region (plus untitled page areas)."""
     from .bind import _parse_kv_line
@@ -506,6 +621,21 @@ def extract_structure(binder) -> Structure:
                 st.fields.append(f)
                 _assign(st, r.label, "label")
                 _assign(st, r.value, "value")
+        # parties printed side by side over their name-and-address blocks
+        for k in range(len(lines)):
+            if k in used:
+                continue
+            blk = _labels_over_blocks(lines, k)
+            if not blk:
+                continue
+            pairs_, taken = blk
+            for ltoks, vlines in pairs_:
+                vt = [t for vl in vlines for t in vl]
+                raw = ", ".join(clean(join_tokens(vl)).rstrip(",") for vl in vlines)
+                st.fields.append(GField(region, ltoks, vt, label_text(join_tokens(ltoks)), raw))
+                _assign(st, ltoks, "label")
+                _assign(st, vt, "value")
+            used |= {k, *taken}
         # tables
         i = 0
         while i < len(lines):
@@ -694,6 +824,7 @@ def extract_structure(binder) -> Structure:
                 if mk.page == region.page and region.contains(mk) and near(mk):
                     f.signature_mark = mk
                     break
+    _tidy_fields(st)
     st.tokens_total = sum(1 for p in binder.pages for t in p.tokens if t.is_content and t.kind != "placeholder")
     return st
 
@@ -1058,15 +1189,45 @@ DOC_KEYWORDS = {
 }
 
 
-def guess_document_type(binder) -> tuple[str, str] | None:
-    """(type, basis) from the words on the first page (see profiles.py), or None when
-    nothing names the document's kind."""
-    from .profiles import classify
+def guess_document_type(binder) -> tuple[str | None, str, str | None]:
+    """(type or None, basis, carried type) from the title and words of the first page
+    (see profiles.py); the carried type is a business document inside an e-mail, letter or memo."""
+    from .profiles import carried_type, classify
 
-    first = [p for p in binder.pages if p.number == 1]
-    words = [t for p in first for t in p.tokens if t.kind == "word"]
-    body = " ".join(t.text for t in words)
-    heads = " ".join(r.heading for r in binder.regions if r.page == 1 and r.heading)
+    from .layout import segments
+
+    # reading order (OCR hands words back by confidence), with a bar between columns
+    # so that no phrase is read across a gap
+    lines = binder.lines_by_page.get(1, [])
+    words = [t for ln in lines for t in ln.tokens if t.kind == "word"]
+    body = "\n".join(" | ".join(" ".join(t.text for t in seg if t.kind == "word") for seg in segments(ln))
+                     for ln in lines)
+    heads = [r.heading for r in binder.regions if r.page == 1 and r.heading]
+    heads += _title_lines(lines, binder.pages_by_no[1].height if 1 in binder.pages_by_no else 792)
     labels = sum(1 for t in words if t.text.endswith(":") and len(t.text) > 2)
-    dtype, basis, _ = classify(heads, body, n_fields=labels, n_words=len(words))
-    return (dtype, basis) if dtype else None
+    head = " | ".join(heads)
+    dtype, basis, _ = classify(head, body, n_fields=labels, n_words=len(words))
+    return dtype, basis, carried_type(head, body, dtype)
+
+
+def _title_lines(lines, page_height: float) -> list[str]:
+    """The title of the first page: lines in its top third set larger than the text
+    around them, or in capitals, or bold."""
+    if not lines:
+        return []
+    heights = sorted(ln.bottom - ln.top for ln in lines)
+    typical = heights[len(heights) // 2]
+    out = []
+    for ln in lines:
+        if ln.top > page_height / 3:
+            break
+        words = [t for t in ln.tokens if t.kind == "word"]
+        letters = re.sub(r"[^A-Za-z]", "", "".join(t.text for t in words))
+        if not words or len(letters) < 3 or len(words) > 8:
+            continue
+        big = ln.bottom - ln.top >= 1.25 * typical
+        caps = letters.isupper() and len(letters) >= 4
+        bold = all(t.bold for t in words)
+        if big or caps or bold:
+            out.append(" ".join(t.text for t in words))
+    return out

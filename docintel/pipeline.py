@@ -335,9 +335,10 @@ def process_pdf(path: str | Path, doc_id: str = "DOC_001", *, filename: str | No
         "document": {
             "doc_id": doc_id,
             "filename": filename or path.name,
-            "document_type": template.document_type if template_used else (guess[0] if guess else "unknown"),
+            "document_type": template.document_type if template_used else (guess[0] or "unknown"),
             "document_type_basis": (f"template {template.template_id}: {len(matched)} of its sections found"
-                                    if template_used else (guess[1] if guess else None)),
+                                    if template_used else guess[1]),
+            "carries": None if template_used else guess[2],
             "title": _title(binder),
             "template": template.template_id if template_used else None,
             "template_applied": template_used,
