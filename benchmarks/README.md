@@ -1,6 +1,6 @@
 # Benchmarks
 
-Two benchmarks measure docintel on documents it was not built from. Both split their
+Three benchmarks measure docintel on documents it was not built from. All split their
 documents **before** any result is looked at:
 
 * the **development** half is where failures are inspected and their causes fixed;

@@ -246,7 +246,8 @@ How the suite grows toward 100 %:
 
 ### Benchmarks on documents docintel was not built from
 
-`benchmarks/` measures docintel on two outside sets. Each is split into a development
+`benchmarks/` measures docintel on outside sets: two form benchmarks and a 1,346-document
+corpus of every kind. Each is split into a development
 half (failures inspected, causes fixed) and a held-out half (only measured). See
 [`benchmarks/README.md`](benchmarks/README.md).
 
@@ -263,6 +264,50 @@ half (failures inspected, causes fixed) and a held-out half (only measured). See
 FUNSD's faxed 1980s forms (handwriting, stamps, 100 dpi scans, labels without colons)
 remain hard for any reader without a template. The silent errors left there are the
 work still ahead: each one is a case where docintel cannot yet see its own doubt.
+
+#### Any document: the 1,346-document corpus
+
+The corpus (`benchmarks/corpus/`) adds receipts, invoices, office correspondence,
+reports, news, adverts, government forms and files in ten formats to the two sets above,
+1,346 documents in all, each scored against its own dataset's labels. Its split is fixed
+by position before anything is looked at: 723 development documents, 623 held out. The
+held-out half was measured once, on the code before this round and on the code after it
+(commit `3b17f63`):
+
+| held-out half (623 documents) | before | after |
+|---|---|---|
+| **Invoices** - FATURA, 50 images, many layouts: total / number / date / due date | 5 / 1 / 5 / 5 of 50 | **50 / 46 / 50 / 49** of 50 |
+| … document type 'invoice' | 10 % | **100 %** |
+| katanaml invoices, 13 images: number, date, seller, buyer, total (65 facts) | 0 | **64** |
+| invoice2data, 5 real PDF invoices (several languages): total, number, date (14 facts) | 3 | 5 |
+| **Receipts** - SROIE, 75 scanned: total / date / merchant | 10 / 15 / 32 | **19 / 38 / 39** |
+| … silent errors in those facts | 54 | **7** |
+| CORD, 50 phone photos of receipts: total | 4 of 46 | 5 of 46 |
+| **Office documents** - RVL-CDIP, 200 scans in 16 classes: type correct | 20.5 % | **35.5 %** |
+| **Government forms** - IRS / CMS / VA / DOL, 20 PDFs, 358 filled values: read | 192 | 196 |
+| … silent errors | 17 | **13** |
+| **Files** - 60 Word / Excel / PowerPoint / OpenDocument / HTML / e-mail / Markdown / RTF / JSON / CSV: fields, cells | 100 %, 91 % | 100 %, 91 % |
+| … silent errors | 0 | 0 |
+| **Forms** - OCR test suite, 100 scans in 10 domains: fields, cells, text | 99.0 %, 100 %, 98.8 % | 99.0 %, 100 %, 98.8 % |
+| FUNSD, 50 faxed forms: links found, precision | 22.5 %, 58.4 % | 24.1 %, 58.0 % |
+| … silent errors | 80 | 88 (87 after one more fix found on the development half) |
+| **all key facts of receipts and invoices** (550) | 80 correct, 60 silent | **365 correct, 15 silent** |
+| **all silent errors measured** | 158 | **117** |
+
+What moved the numbers, all general rules found on the development half: words read in
+reading order (OCR returns them by confidence); title lines and type-naming phrases
+weighted over shared words; amounts read token by token, with a dropped decimal point or
+a second amount sent to review instead of passed as read; 'Seller:' / 'Bill To:' labels
+over name-and-address blocks; 'Total' rows read from their total column; a label that
+names another fact ('Invoice Date') kept off the invoice number; dates in the future,
+totals below their tax and subtotals above their total flagged; uneven lighting evened
+out on photos; pages that read poorly tried upside down.
+
+What is still hard, honestly: phone photos of small receipts (CORD) where OCR itself
+reads half the words; RVL's handwritten pages and image-only adverts, which have almost
+no readable text (docintel says so: "the page reads poorly"); and FUNSD, where pages
+that were read upside down before are now read upright, so more is found (+14 links) and
+a few more of those finds are wrong without a flag (+7). Those 87 are the next work.
 
 ## Document types and key facts
 
