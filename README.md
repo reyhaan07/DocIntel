@@ -270,44 +270,58 @@ work still ahead: each one is a case where docintel cannot yet see its own doubt
 The corpus (`benchmarks/corpus/`) adds receipts, invoices, office correspondence,
 reports, news, adverts, government forms and files in ten formats to the two sets above,
 1,346 documents in all, each scored against its own dataset's labels. Its split is fixed
-by position before anything is looked at: 723 development documents, 623 held out. The
-held-out half was measured once, on the code before this round and on the code after it
-(commit `3b17f63`):
+by position before anything is looked at: 723 development documents, 623 held out. Each
+round fixes causes found on the development half only; the held-out half is then measured
+once, on the code as committed (round 1: `3b17f63`, round 2: `d8bdb88`).
 
-| held-out half (623 documents) | before | after |
-|---|---|---|
-| **Invoices** - FATURA, 50 images, many layouts: total / number / date / due date | 5 / 1 / 5 / 5 of 50 | **50 / 46 / 50 / 49** of 50 |
-| … document type 'invoice' | 10 % | **100 %** |
-| katanaml invoices, 13 images: number, date, seller, buyer, total (65 facts) | 0 | **64** |
-| invoice2data, 5 real PDF invoices (several languages): total, number, date (14 facts) | 3 | 5 |
-| **Receipts** - SROIE, 75 scanned: total / date / merchant | 10 / 15 / 32 | **19 / 38 / 39** |
-| … silent errors in those facts | 54 | **7** |
-| CORD, 50 phone photos of receipts: total | 4 of 46 | 5 of 46 |
-| **Office documents** - RVL-CDIP, 200 scans in 16 classes: type correct | 20.5 % | **35.5 %** |
-| **Government forms** - IRS / CMS / VA / DOL, 20 PDFs, 358 filled values: read | 192 | 196 |
-| … silent errors | 17 | **13** |
-| **Files** - 60 Word / Excel / PowerPoint / OpenDocument / HTML / e-mail / Markdown / RTF / JSON / CSV: fields, cells | 100 %, 91 % | 100 %, 91 % |
-| … silent errors | 0 | 0 |
-| **Forms** - OCR test suite, 100 scans in 10 domains: fields, cells, text | 99.0 %, 100 %, 98.8 % | 99.0 %, 100 %, 98.8 % |
-| FUNSD, 50 faxed forms: links found, precision | 22.5 %, 58.4 % | 24.1 %, 58.0 % |
-| … silent errors | 80 | 88 (87 after one more fix found on the development half) |
-| **all key facts of receipts and invoices** (550) | 80 correct, 60 silent | **365 correct, 15 silent** |
-| **all silent errors measured** | 158 | **117** |
+| held-out half (623 documents) | before | round 1 | round 2 |
+|---|---|---|---|
+| **Invoices** - FATURA, 50 images, many layouts: total / number / date / due date | 5 / 1 / 5 / 5 | 50 / 46 / 50 / 49 | 50 / 46 / 50 / 49 |
+| … document type 'invoice' | 10 % | 100 % | 100 % |
+| katanaml invoices, 13 images: number, date, seller, buyer, total (65 facts) | 0 | 64 | 64 |
+| invoice2data, 5 real PDF invoices (several languages): total, number, date (14 facts) | 3 | 5 | 5 |
+| **Receipts** - SROIE, 75 scanned: total / date / merchant | 10 / 15 / 32 | 19 / 38 / 39 | **27** / 38 / 39 |
+| … silent errors in those facts | 54 | 7 | **3** |
+| **Receipt photos** - CORD, 50 phone photos: total | 4 of 46 | 5 of 46 | **16** of 46 |
+| … document type 'receipt' | 34 % | 28 % | **52 %** |
+| **Office documents** - RVL-CDIP, 200 scans in 16 classes: type correct | 20.5 % | 35.5 % | 35.5 % |
+| **Government forms** - IRS / CMS / VA / DOL, 20 PDFs, 358 filled values: read | 192 | 196 | 196 |
+| … silent errors | 17 | 13 | 13 |
+| **Files** - 60 Word / Excel / PowerPoint / OpenDocument / HTML / e-mail / Markdown / RTF / JSON / CSV: fields, cells | 100 %, 91 % | 100 %, 91 % | 100 %, 91 % |
+| … silent errors | 0 | 0 | 0 |
+| **Forms** - OCR test suite, 100 scans in 10 domains: fields, cells, text | 99.0 %, 100 %, 98.8 % | same | same |
+| … silent errors | 1 | 1 | 1 |
+| FUNSD, 50 faxed forms: links found, precision | 22.5 %, 58.4 % | 24.1 %, 58.0 % | 24.1 %, 58.0 % |
+| … silent errors | 80 | 88 | **31** |
+| **all key facts of receipts and invoices** (550) | 80 correct, 60 silent | 365 correct, 15 silent | **384 correct, 11 silent** |
+| **all silent errors measured** | 158 | 117 | **56** |
 
-What moved the numbers, all general rules found on the development half: words read in
-reading order (OCR returns them by confidence); title lines and type-naming phrases
-weighted over shared words; amounts read token by token, with a dropped decimal point or
-a second amount sent to review instead of passed as read; 'Seller:' / 'Bill To:' labels
-over name-and-address blocks; 'Total' rows read from their total column; a label that
-names another fact ('Invoice Date') kept off the invoice number; dates in the future,
-totals below their tax and subtotals above their total flagged; uneven lighting evened
-out on photos; pages that read poorly tried upside down.
+What moved the numbers, all general rules found on the development halves:
 
-What is still hard, honestly: phone photos of small receipts (CORD) where OCR itself
-reads half the words; RVL's handwritten pages and image-only adverts, which have almost
-no readable text (docintel says so: "the page reads poorly"); and FUNSD, where pages
-that were read upside down before are now read upright, so more is found (+14 links) and
-a few more of those finds are wrong without a flag (+7). Those 87 are the next work.
+* *Round 1* - words read in reading order (OCR returns them by confidence); title lines and
+  type-naming phrases weighted over shared words; amounts read token by token, with a
+  dropped decimal point or a second amount sent to review instead of passed as read;
+  'Seller:' / 'Bill To:' labels over name-and-address blocks; 'Total' rows read from their
+  total column; dates in the future, totals below their tax and subtotals above their
+  total flagged; uneven lighting evened out on photos; pages that read poorly tried upside
+  down.
+* *Round 2, scanned forms* - a pairing is only as good as its evidence: a table whose values
+  do not line up under its headings is a form read as a grid; a value spread across the
+  line like separate entries is check-box choices or a second label; a text value far from
+  its label, or stacked under it in the same size of print (two labels), goes to review;
+  ink beside a label that asks for no signature is handwriting, not a signature.
+* *Round 2, photos* - a photo is not straightened by its ink profile nor stripped of ruled
+  lines (both cost words on curled paper); its tilt is measured from the words Tesseract
+  places on each line; it is read at the print size OCR handles best, by three passes that
+  vote; a total is read from its printed row even where the amount drifted onto a line of
+  its own; the receipt's own arithmetic (subtotal + tax, cash - change) confirms exact
+  readings and supplies a missing total for review.
+
+What is still hard: phone photos where no total is found at all (27 of 46 in CORD's held-out
+half: faint thermal print, crumpled paper, blurred-out text); RVL's handwritten pages and
+image-only adverts, which have almost no readable text (docintel says so: "the page reads
+poorly"); and FUNSD's faxed forms, where more answers are found than before but many are
+sent to review rather than trusted.
 
 ## Document types and key facts
 
